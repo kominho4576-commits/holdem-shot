@@ -9,13 +9,18 @@
 <link rel="icon" href="icons/icon-192.png">
 <style>
 :root{ --ink:#7c6cf4; --line:#c7c1ff; --soft:#e7e3ff; }
-*{box-sizing:border-box} html,body{height:100%;margin:0;background:#fff;color:var(--ink);font-family:system-ui,-apple-system,"Apple SD Gothic Neo",Segoe UI,Roboto,Helvetica,Arial,"Noto Sans KR",sans-serif}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:#fff;color:var(--ink);font-family:system-ui,-apple-system,"Apple SD Gothic Neo",Segoe UI,Roboto,Helvetica,Arial,"Noto Sans KR",sans-serif}
 button{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6rem 1rem; border-radius:18px; font-weight:900; cursor:pointer; box-shadow:0 0 0 3px var(--soft) inset}
 button:disabled{opacity:.5;cursor:not-allowed}
 input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6rem 1rem; border-radius:18px; font-weight:800; width:100%; box-shadow:0 0 0 3px var(--soft) inset}
 .title{font-size:clamp(28px,6vw,64px);font-weight:900;text-align:center;margin:40px 0}
-.container{max-width:1100px;margin:0 auto;padding:0 16px 40px}
-.sketch{border:4px solid var(--line);border-radius:18px;box-shadow:0 0 0 3px var(--soft) inset;padding:1rem;max-width:760px;margin:0 auto;}
+.container{max-width:1100px;margin:0 auto;padding:40px 16px 60px}          /* 위 여백 ↑ */
+.sketch{
+  border:4px solid var(--line);border-radius:18px;box-shadow:0 0 0 3px var(--soft) inset;
+  padding:20px;max-width:760px;margin:32px auto 0;                         /* 박스 아래로 내림 */
+  min-height:170px;                                                         /* 덜 납작하게 */
+}
 .row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}
 .status{display:flex;align-items:center;gap:8px;margin-top:12px}
 .statusWrap{max-width:760px;margin:8px auto 0;padding:0 2px}
@@ -45,7 +50,6 @@ input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6
 .card{width:140px; aspect-ratio:2.5/3.5; border:5px solid var(--line); border-radius:14px; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:44px; color:var(--ink); background:#fff; position:relative; overflow:hidden; box-shadow:0 0 0 3px var(--soft) inset; user-select:none; transition:.1s; text-align:center}
 .card .big{font-size:44px; line-height:1; }
 .card .small{font-size:18px; opacity:.8; margin-top:6px}
-/* JOKER label smaller */
 .card .big.jokerLabel{ font-size:30px; letter-spacing:1px; }
 .card .tagJoker{ font-size:16px; opacity:.75; margin-top:6px }
 
@@ -68,7 +72,6 @@ input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6
 .arrow{position:absolute; top:-22px; left:50%; transform:translateX(-50%); width:0;height:0;border-left:18px solid transparent;border-right:18px solid transparent;border-top:24px solid var(--ink);}
 .infoLine{margin-top:8px;opacity:.85; text-align:center}
 
-/* result colors */
 .safeText{ color:#2ecc71; font-weight:900 }
 .bangText{ color:#e74c3c; font-weight:900 }
 
@@ -91,6 +94,7 @@ input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6
 <div id="rotate"><div class="box"><h2>Rotate to Landscape</h2><p>Mobile supports landscape only. Please rotate your device.</p></div></div>
 <div id="flash"></div>
 
+<!-- HOME -->
 <div id="screen-home" class="screen active" aria-hidden="false">
   <div class="title">Hold’em&SHOT.io</div>
   <div class="container">
@@ -101,7 +105,7 @@ input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6
       </div>
       <div class="row" style="margin-top:8px">
         <button id="btnCreate">Create Room</button>
-        <input id="roomCode" placeholder="Room Code" />
+        <input id="roomCode" placeholder="Room Code" readonly /> <!-- 읽기 전용 -->
       </div>
       <div class="row" style="margin-top:8px">
         <input id="joinCode" placeholder="Enter Code to Join" />
@@ -116,16 +120,18 @@ input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6
   </div>
 </div>
 
+<!-- CONNECTING -->
 <div id="screen-connecting" class="screen" aria-hidden="true">
   <div class="title">Hold’em&SHOT.io</div>
   <div class="container">
     <div class="sketch center" style="min-height:320px;flex-direction:column;gap:18px">
       <div class="spinner"></div>
-      <div id="connectingText" style="font-size:44px;font-weight:900">Connecting... <span id="count">8</span>s</div>
+      <div id="connectingText" style="font-size:44px;font-weight:900">Connecting…</div>
     </div>
   </div>
 </div>
 
+<!-- PLAY -->
 <div id="screen-play" class="screen" aria-hidden="true">
   <div class="wrap">
     <section class="board activePanel" id="board">
@@ -163,6 +169,7 @@ input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6
   </div>
 </div>
 
+<!-- RESULTS -->
 <div id="screen-victory" class="screen" aria-hidden="true">
   <div class="title">Victory</div>
   <div class="center small" id="vicBack" style="margin-bottom:12px">Back to Home in 5s…</div>
@@ -181,28 +188,16 @@ input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6
   </div></div></div>
 </div>
 
+<!-- Socket.IO client -->
+<script>
+  // 서버 주소 (Render)
+  const API_BASE = "https://holdem-shot.onrender.com";
+</script>
+<script src="https://holdem-shot.onrender.com/socket.io/socket.io.js"></script>
+
 <script>
 // ===== Utilities =====
 const $=id=>document.getElementById(id);
-
-// ✅ Render 서버 주소(고정)
-const API_BASE = "https://holdem-shot.onrender.com";
-
-function checkServer(){
-  fetch(`${API_BASE}/health`)
-    .then(r=>{
-      if(r.ok) $('srvDot').classList.add('on');
-      else $('srvDot').classList.remove('on');
-    })
-    .catch(()=>$('srvDot').classList.remove('on'));
-}
-
-// 초기 1회 체크 + Retry 버튼
-window.addEventListener('DOMContentLoaded', ()=>{
-  checkServer();
-  $('retry').onclick = (e)=>{ e.preventDefault(); checkServer(); };
-});
-
 const screens=["home","connecting","play","victory","defeat"];
 function show(n){
   screens.forEach(s=>{
@@ -219,66 +214,104 @@ document.addEventListener("click", async ()=>{ if(isMobile() && screen.orientati
 
 // PWA SW
 if('serviceWorker' in navigator){
-  window.addEventListener('load', ()=>{
-    navigator.serviceWorker.register('sw.js').catch(()=>{});
-  });
+  window.addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
 }
 
-// Buttons (no overlays block)
-["btnQuick","btnCreate","btnJoin"].forEach(id=>$(id).addEventListener('click',()=>{
-  startConnectingThenAI(getNick());
-}));
+// 서버 헬스
+function setServerDot(ok){ ok ? $('srvDot').classList.add('on') : $('srvDot').classList.remove('on'); }
+function checkServer(){
+  fetch(`${API_BASE}/health`).then(r=>setServerDot(r.ok)).catch(()=>setServerDot(false));
+}
+window.addEventListener('DOMContentLoaded', ()=>{
+  checkServer();
+  $('retry').onclick = (e)=>{ e.preventDefault(); checkServer(); };
+});
+
 function getNick(){ return ($("nickname").value.trim()||"PLAYER"); }
+
+// ====== Socket / Matching ======
+const socket = io(API_BASE, { transports: ['websocket'] });
+
+function genCode(len=6){
+  const chars='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  return Array.from({length:len},()=>chars[Math.floor(Math.random()*chars.length)]).join('');
+}
+
+// Create Room → 코드 자동 생성 + 대기
+$('btnCreate').onclick = (e)=>{
+  e.preventDefault();
+  const code = genCode();
+  $('roomCode').value = code;
+  const nick = getNick();
+  show('connecting');
+  $('connectingText').innerHTML = `Creating room <b>${code}</b>…`;
+  socket.emit('createRoom', { code, nick });
+};
+
+// Join Room
+$('btnJoin').onclick = (e)=>{
+  e.preventDefault();
+  const code = $('joinCode').value.trim().toUpperCase();
+  if(!/^[A-Z2-9]{6}$/.test(code)) return alert('6자리 초대 코드를 입력하세요.');
+  const nick = getNick();
+  show('connecting');
+  $('connectingText').innerHTML = `Joining <b>${code}</b>…`;
+  socket.emit('joinRoom', { code, nick });
+};
+
+// Quick Match: 방 자동 생성 (코드 복사)
+$('btnQuick').onclick = (e)=>{
+  e.preventDefault();
+  const code = genCode();
+  $('roomCode').value = code;
+  navigator.clipboard?.writeText(code).catch(()=>{});
+  const nick = getNick();
+  show('connecting');
+  $('connectingText').innerHTML = `Quick room <b>${code}</b> created. Share code to your friend.`;
+  socket.emit('createRoom', { code, nick });
+};
+
+// Socket events
+socket.on('roomCreated', ({code})=>{
+  $('connectingText').innerHTML = `Room <b>${code}</b> created. Waiting for opponent…`;
+});
+socket.on('roomJoined', ({code, host})=>{
+  $('connectingText').innerHTML = `Joined <b>${code}</b>. Waiting for ${host}…`;
+});
+socket.on('startGame', ({ you, opp, code })=>{
+  $('roomCode').value = code;
+  $('nameYou').textContent = you;
+  $('nameOpp').textContent = opp;
+  show('play');
+  Game.start(you);
+});
+socket.on('roomError', (msg)=>{
+  alert(msg||'Room error');
+  show('home');
+  checkServer();
+});
 
 // ===== Cards / Poker helpers =====
 const SUITS=["♠","♥","♦","♣"], RANKS=["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
 const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j]]}return a};
 const deal=(d,n)=>d.splice(0,n);
 const deckNew=_=>{const d=[]; for(const s of SUITS){ for(const r of RANKS){ d.push({rank:r,suit:s}); } } d.push({joker:true}); d.push({joker:true}); return d;};
-
-// ***** 7 -> best 5 evaluation with wrap straight *****
 const RANK_ORDER = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
 const RANK_TO_I = Object.fromEntries(RANK_ORDER.map((r,i)=>[r,i]));
 
-function isFlush5(cards){
-  const s = cards.map(c=>c.suit);
-  return s.every(x=>x===s[0]);
-}
-function isFour(cards){
-  const cnt={}; cards.forEach(c=>cnt[c.rank]=(cnt[c.rank]||0)+1);
-  return Object.values(cnt).includes(4);
-}
-function isFullHouse(cards){
-  const cnt={}; cards.forEach(c=>cnt[c.rank]=(cnt[c.rank]||0)+1);
-  const vals=Object.values(cnt).sort((a,b)=>b-a);
-  return vals[0]===3 && vals[1]===2;
-}
-function isThree(cards){
-  const cnt={}; cards.forEach(c=>cnt[c.rank]=(cnt[c.rank]||0)+1);
-  return Object.values(cnt).includes(3);
-}
-function pairCounts(cards){
-  const cnt={}; cards.forEach(c=>cnt[c.rank]=(cnt[c.rank]||0)+1);
-  const pairs = Object.values(cnt).filter(v=>v===2).length;
-  return pairs;
-}
+function isFlush5(cards){ const s = cards.map(c=>c.suit); return s.every(x=>x===s[0]); }
+function isFour(cards){ const cnt={}; cards.forEach(c=>cnt[c.rank]=(cnt[c.rank]||0)+1); return Object.values(cnt).includes(4); }
+function isFullHouse(cards){ const cnt={}; cards.forEach(c=>cnt[c.rank]=(cnt[c.rank]||0)+1); const v=Object.values(cnt).sort((a,b)=>b-a); return v[0]===3 && v[1]===2; }
+function isThree(cards){ const cnt={}; cards.forEach(c=>cnt[c.rank]=(cnt[c.rank]||0)+1); return Object.values(cnt).includes(3); }
+function pairCounts(cards){ const cnt={}; cards.forEach(c=>cnt[c.rank]=(cnt[c.rank]||0)+1); return Object.values(cnt).filter(v=>v===2).length; }
 function isStraight5(cards){
-  const uniq=[...new Set(cards.map(c=>RANK_TO_I[c.rank]))];
-  if(uniq.length<5) return false;
+  const uniq=[...new Set(cards.map(c=>RANK_TO_I[c.rank]))]; if(uniq.length<5) return false;
   uniq.sort((a,b)=>a-b);
-  for(let start=0; start<13; start++){
-    let ok=true;
-    for(let k=0;k<5;k++){
-      const val=(start+k)%13;
-      if(!uniq.includes(val)){ ok=false; break; }
-    }
-    if(ok) return true;
-  }
+  for(let s=0;s<13;s++){ let ok=true; for(let k=0;k<5;k++){ const v=(s+k)%13; if(!uniq.includes(v)){ ok=false; break; } } if(ok) return true; }
   return false;
 }
 function scoreName5(cards){
-  const flush=isFlush5(cards);
-  const straight=isStraight5(cards);
+  const flush=isFlush5(cards), straight=isStraight5(cards);
   if(flush && straight) return {score:8, name:"Straight Flush"};
   if(isFour(cards)) return {score:7, name:"Four of a Kind"};
   if(isFullHouse(cards)) return {score:6, name:"Full House"};
@@ -292,18 +325,12 @@ function scoreName5(cards){
 }
 function allComb5(arr){
   const res=[]; const n=arr.length;
-  for(let a=0;a<n-4;a++)for(let b=a+1;b<n-3;b++)for(let c=b+1;c<n-2;c++)for(let d=c+1;d<n-1;d++)for(let e=d+1;e<n;e++){
-    res.push([arr[a],arr[b],arr[c],arr[d],arr[e]]);
-  }
+  for(let a=0;a<n-4;a++)for(let b=a+1;b<n-3;b++)for(let c=b+1;c<n-2;c++)for(let d=c+1;d<n-1;d++)for(let e=d+1;e<n;e++){ res.push([arr[a],arr[b],arr[c],arr[d],arr[e]]); }
   return res;
 }
 function bestFrom7(seven){
-  const combs=allComb5(seven);
-  let best=null;
-  for(const c5 of combs){
-    const sn=scoreName5(c5);
-    if(!best || sn.score>best.score) best={score:sn.score,name:sn.name,cards:c5};
-  }
+  const combs=allComb5(seven); let best=null;
+  for(const c5 of combs){ const sn=scoreName5(c5); if(!best || sn.score>best.score) best={score:sn.score,name:sn.name,cards:c5}; }
   return best;
 }
 function bestHand(cards){
@@ -344,9 +371,7 @@ const Game=(()=>{
   function other(p){return p==='you'?'opp':'you'}
 
   function cardTextHTML(c){
-    if(c.joker && c.trRank && c.trSuit){
-      return `<div class="big">${c.trRank}${c.trSuit}</div><div class="tagJoker">(JOKER)</div>`;
-    }
+    if(c.joker && c.trRank && c.trSuit){ return `<div class="big">${c.trRank}${c.trSuit}</div><div class="tagJoker">(JOKER)</div>`; }
     if(c.joker){ return `<div class="big jokerLabel">JOKER</div>`; }
     return `<div class="big">${c.rank}${c.suit}</div>`;
   }
@@ -357,9 +382,7 @@ const Game=(()=>{
     return el;
   }
 
-  function hasUnresolvedJoker(hand){
-    return hand.some(c => c.joker && !(c.trRank && c.trSuit));
-  }
+  function hasUnresolvedJoker(hand){ return hand.some(c => c.joker && !(c.trRank && c.trSuit)); }
 
   function render(){
     updateRound();
@@ -376,24 +399,11 @@ const Game=(()=>{
     const flat=[...document.querySelectorAll("#shared .card")];
     S.shared.slice(0,5).forEach((c,i)=>{ const el=flat[i]; el.className="card "+(c.back?"back":"face"); el.innerHTML=c.back?"":cardTextHTML(c); });
 
-    if(needYouTransform){
-      $("resultLine").innerHTML = "Your JOKER must transform to one of the revealed community cards (tap one).";
-    }
+    if(needYouTransform){ $("resultLine").innerHTML = "Your JOKER must transform to one of the revealed community cards (tap one)."; }
   }
 
-  function drawNonJoker(){
-    let c = S.deck.shift();
-    while(c && c.joker){ S.deck.push({joker:true}); S.deck=shuffle(S.deck); c=S.deck.shift(); }
-    return c;
-  }
-  function revealTo(n){
-    for(let i=0;i<n;i++){
-      if(S.shared[i].back){
-        S.shared[i]=drawNonJoker();
-      }
-    }
-    render();
-  }
+  function drawNonJoker(){ let c = S.deck.shift(); while(c && c.joker){ S.deck.push({joker:true}); S.deck=shuffle(S.deck); c=S.deck.shift(); } return c; }
+  function revealTo(n){ for(let i=0;i<n;i++){ if(S.shared[i].back){ S.shared[i]=drawNonJoker(); } } render(); }
   function exchange(hand, idxs){ idxs.sort((a,b)=>b-a).forEach(i=>{ hand[i]=S.deck.shift(); }); render(); }
 
   function phaseStartFlop(){ setPhase("Flop"); revealTo(3); S.exchangeFirst = Math.random()<0.5 ? 'you':'opp'; S.turn = S.exchangeFirst; S.exchangeStep = 0; render(); if(S.turn==='opp') aiAct(); }
@@ -415,10 +425,8 @@ const Game=(()=>{
     timers.push(setTimeout(phaseStartFlop, 1000));
   }
 
-  // flash helper
   function flash(color){
-    const f=$("flash");
-    f.style.background = color==='white' ? 'rgba(255,255,255,0.6)' : 'rgba(255,0,0,0.25)';
+    const f=$("flash"); f.style.background = color==='white' ? 'rgba(255,255,255,0.6)' : 'rgba(255,0,0,0.25)';
     f.classList.remove("flashOnce"); void f.offsetWidth; f.classList.add("flashOnce");
   }
 
@@ -431,7 +439,7 @@ const Game=(()=>{
     const cmp = yh.score>oh.score?1:yh.score<oh.score?-1:0;
     if(cmp===0){
       $("resultLine").innerHTML=line+"<br/>— Tie —";
-      timers.push(setTimeout(()=>{ S.round++; newRound(); }, 5000));
+      setTimeout(()=>{ S.round++; newRound(); }, 1500);
       return;
     }
     const loser = (cmp>0)? S.opp : S.you;
@@ -440,7 +448,7 @@ const Game=(()=>{
     const youJ=S.you.hand.some(c=>c.joker), oppJ=S.opp.hand.some(c=>c.joker);
     S.loserHadJoker = loser==S.you?youJ:oppJ; S.winnerHadJoker = winner==S.you?youJ:oppJ;
     S.loserNeedsRoulette=true;
-    startRouletteCountdown(8, loser);
+    startRouletteCountdown(4, loser);
   }
 
   // ===== Roulette =====
@@ -479,26 +487,21 @@ const Game=(()=>{
     info.textContent = `Russian Roulette in ${t}s`;
     clearInterval(rrTimer);
     rrTimer=setInterval(()=>{
-      t--;
-      info.textContent = `Russian Roulette in ${t}s`;
+      t--; info.textContent = `Russian Roulette in ${t}s`;
       if(t<=0){ clearInterval(rrTimer); loadBulletsAndSpin(loser); }
     },1000);
   }
 
   function loadBulletsAndSpin(loser){
-    // Prepare bullets count
     const base=Math.min(6,S.round);
     const extra=S.winnerHadJoker?1:0;
     const bullets=Math.min(6, base+extra);
     createHoles();
     const idxs=[0,1,2,3,4,5]; shuffle(idxs);
     const chosen=idxs.slice(0,bullets);
-    for(let i=0;i<6;i++){
-      const el=$('b'+i); if(el) el.className = chosen.includes(i)? 'bullet' : '';
-    }
+    for(let i=0;i<6;i++){ const el=$('b'+i); if(el) el.className = chosen.includes(i)? 'bullet' : ''; }
     $("rouletteInfo").textContent=`Bullets loaded: ${bullets}`;
 
-    // If loser had a Joker, skip one spin
     if(S.loserHadJoker){
       $("rouletteInfo").textContent = `Loser had JOKER → Free pass`;
       S.loserNeedsRoulette=false; S.round++; newRound(); render(); return;
@@ -506,7 +509,6 @@ const Game=(()=>{
 
     setTimeout(()=>{
       const idx=Math.floor(Math.random()*6);
-      // Spin
       const degs=[90,30,330,270,210,150];
       const drum=$('drum');
       drum.style.transform='rotate(0deg)';
@@ -516,27 +518,22 @@ const Game=(()=>{
         const rot=spins*360 + (targetDeg-90);
         drum.style.transform=`rotate(${rot}deg)`;
       });
-      // After spin ends
       setTimeout(()=>{
         const hole = document.querySelector(`.hole[data-i="${idx}"]`);
         if(hole) hole.classList.add('selected');
         const target=document.getElementById('b'+idx);
         const hit = target && target.classList.contains('bullet');
 
-        // SAFE/BANG text
-        $('rouletteInfo').innerHTML = hit
-          ? `<span class="bangText">BANG!</span>`
-          : `<span class="safeText">SAFE</span>`;
-
+        $('rouletteInfo').innerHTML = hit ? `<span class="bangText">BANG!</span>` : `<span class="safeText">SAFE</span>`;
         const loserIsYou = (loser==S.you);
 
         if(hit){
           if(loserIsYou){
-            const f=$("flash"); f.style.background='rgba(255,0,0,0.25)'; f.classList.remove("flashOnce"); void f.offsetWidth; f.classList.add("flashOnce");
+            flash('red');
             $("dwinName").textContent = S.opp.name; $("dloseName").textContent = S.you.name;
             show("defeat"); backHomeIn('defBack',5,true);
           }else{
-            const f=$("flash"); f.style.background='rgba(255,255,255,0.6)'; f.classList.remove("flashOnce"); void f.offsetWidth; f.classList.add("flashOnce");
+            flash('white');
             $("winName").textContent = S.you.name; $("loseName").textContent = S.opp.name;
             show("victory"); backHomeIn('vicBack',5,true);
           }
@@ -544,7 +541,7 @@ const Game=(()=>{
           S.loserNeedsRoulette=false; S.round++; newRound(); render();
         }
       }, 2300);
-    }, 1200);
+    }, 800);
   }
 
   function afterExchange(){
@@ -552,7 +549,6 @@ const Game=(()=>{
     else { nextPhaseFrom(S.phase); }
   }
 
-  // AI: if River and has unresolved Joker, transform to best community rank
   function aiResolveJokerIfNeeded(){
     if(S.phase!=='River') return;
     const shared = S.shared.slice(0,5);
@@ -565,10 +561,7 @@ const Game=(()=>{
       const {score} = bestFrom7(tempHand.concat(shared));
       if(score>bestScore){ bestScore=score; best={rank:t.rank,suit:t.suit}; }
     }
-    if(best){
-      S.opp.hand[idx].trRank=best.rank;
-      S.opp.hand[idx].trSuit=best.suit;
-    }
+    if(best){ S.opp.hand[idx].trRank=best.rank; S.opp.hand[idx].trSuit=best.suit; }
   }
 
   function aiAct(){
@@ -595,14 +588,16 @@ const Game=(()=>{
   };
   $("btnSurrender").onclick=()=>{ $("dwinName").textContent=S.opp.name; $("dloseName").textContent=S.you.name; show("defeat"); backHomeIn('defBack',5,true); };
 
-  // Joker transform (you)
   let jokerPending=null;
   document.addEventListener('click',(e)=>{
     const t=e.target.closest('.card'); if(!t) return;
     const p=t.parentElement;
     if(p && p.id==='hand'){ const idx=+t.dataset.index; const card=S.you.hand[idx]; if(card && card.joker){ jokerPending=idx; $("resultLine").innerHTML='JOKER selected<br/>Tap a revealed community card to transform.'; } }
     if(p && p.closest('#shared') && jokerPending!==null){
-      const flat=[...document.querySelectorAll('#shared .card')]; const sIndex=flat.indexOf(t); if(sIndex>-1){ const target=S.shared[sIndex]; if(target && !target.back){ const j=S.you.hand[jokerPending]; j.trRank=target.rank; j.trSuit=target.suit; jokerPending=null; $("resultLine").innerHTML=`${S.you.name} transformed JOKER<br/>→ ${j.trRank}${j.trSuit}`; render(); } }
+      const flat=[...document.querySelectorAll('#shared .card')]; const sIndex=flat.indexOf(t);
+      if(sIndex>-1){ const target=S.shared[sIndex];
+        if(target && !target.back){ const j=S.you.hand[jokerPending]; j.trRank=target.rank; j.trSuit=target.suit; jokerPending=null; $("resultLine").innerHTML=`${S.you.name} transformed JOKER<br/>→ ${j.trRank}${j.trSuit}`; render(); }
+      }
     }
   });
 
@@ -625,25 +620,6 @@ function backHomeIn(id,sec,hard){
   let t=sec; const el=$(id);
   const iv=setInterval(()=>{ el.textContent=`Back to Home in ${t--}s…`; if(t<0){ clearInterval(iv); show('home'); if(hard) location.reload(); } },1000);
 }
-
-// Connect screen → AI fallback
-function startConnectingThenAI(nick){
-  show("connecting");
-  let t=8;
-  const span=$('count');
-  span.textContent=t;
-  const iv=setInterval(()=>{
-    t--; span.textContent=t;
-    if(t<=0){
-      clearInterval(iv);
-      // Fallback to AI
-      show("play");
-      Game.start(nick);
-    }
-  },1000);
-}
-
-// Orientation overlay
 </script>
 </body>
 </html>
