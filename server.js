@@ -1,29 +1,34 @@
-// server.js
+// server.js (CORS 부분 교체)
 import express from "express";
 import cors from "cors";
 import { createServer } from "http";
 import { Server } from "socket.io";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-app.use(
-  cors({
-    origin: ["https://holdemshot.netlify.app", /\.netlify\.app$/],
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+const ORIGINS = [
+  "https://holdemshot.netlify.app",
+  /.*\.netlify\.app$/,
+  "https://holdemshot.vercel.app",
+  /.*\.vercel\.app$/,
+  "https://holdemshot.pages.dev",
+  /.*\.pages\.dev$/,
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://localhost:8080",
+];
 
-app.get("/health", (_req, res) => res.status(200).send("OK"));
+app.use(cors({
+  origin: ORIGINS,
+  methods: ["GET","POST","OPTIONS"],
+  allowedHeaders: ["Content-Type","Authorization"],
+}));
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: {
-    origin: ["https://holdemshot.netlify.app", /\.netlify\.app$/],
-    methods: ["GET", "POST"],
-  },
+  cors: { origin: ORIGINS, methods: ["GET","POST"] },
 });
+
 
 /* -------------------- 매칭/룸 -------------------- */
 const waitingQueue = []; // {id, nick}
