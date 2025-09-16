@@ -47,7 +47,9 @@ input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6
 .face{background:linear-gradient(180deg,#fff 70%, rgba(124,108,244,.08));}
 .handBottom{position:absolute; left:60px; bottom:120px; display:flex; gap:22px; align-items:center; z-index:5;}
 .resultLine{position:absolute; left:60px; right:60px; top:520px; text-align:center; font-weight:900; opacity:.95}
-.btns{position:absolute; right:120px; bottom:34px; display:flex; gap:12px; align-items:center; font-weight:800; z-index:6;}
+.btns{position:absolute; right:120px; bottom:34px; display:flex; gap:12px; align-items:flex-end; font-weight:800; z-index:6;}
+.readyWrap{display:flex; flex-direction:column; align-items:flex-end; gap:6px;}
+.readyCount{font-size:12px; opacity:.8; margin-right:2px;}
 
 .rwrap{height:100%; display:grid; place-items:center}
 .drum{position:relative; width:min(420px,72vh); aspect-ratio:1/1; border:5px solid var(--line); border-radius:50%; box-shadow:0 0 0 3px var(--soft) inset; display:grid; place-items:center; overflow:visible; transition: transform 2.2s cubic-bezier(.22,.8,.25,1);}
@@ -78,11 +80,11 @@ let socket = null;
 let myId = null;
 let matchTimer = null;
 let currentRoomId = null;
-let isLocal = false; // (옵션) 오프라인 폴백
+let isLocal = false; // 오프라인 폴백 비활성(서버 필수)
 let selection = new Set(); // 내 교환 선택 인덱스(최대 2)
 let forceReveal = false;   // 쇼다운 이후 다음 라운드 시작 전까지 상대패 강제 공개
 
-/* ---------- UI 초기화 ---------- */
+/* ---------- UI ---------- */
 const app = document.getElementById("app");
 app.innerHTML = `
   <div id="screen-home" class="screen active" aria-hidden="false">
@@ -139,7 +141,10 @@ app.innerHTML = `
         <div class="handBottom" id="hand"></div>
 
         <div class="btns">
-          <button id="btnReady" disabled>Ready</button>
+          <div class="readyWrap">
+            <div class="readyCount" id="readyCount">0/2 Ready</div>
+            <button id="btnReady" disabled>Ready</button>
+          </div>
           <button id="btnSurrender">Surrender</button>
         </div>
 
@@ -201,7 +206,6 @@ function initSocket(){
 
   socket.on("connect", ()=>{ myId = socket.id; });
 
-  /* ---- 매칭/룸 ---- */
   socket.on("qm:queued", ()=>{});
   socket.on("qm:found", ({roomId, opponentNick, youNick})=>{
     if(matchTimer){ clearInterval(matchTimer); matchTimer=null; }
@@ -216,56 +220,45 @@ function initSocket(){
   socket.on("room:error", ({message})=> alert(message||"Room error"));
   socket.on("room:peer-left", ()=>{ alert("Opponent left."); location.reload(); });
 
-  /* ---- 게임 상태 렌더 ---- */
   socket.on("game:state", renderFromState);
-
-  /* ---- 쇼다운 결과 ---- */
   socket.on("round:result", onRoundResult);
-
-  /* ---- 러시안 룰렛 ---- */
   socket.on("roulette:spin", onRouletteSpin);
 }
 
-/* ---------- 렌더링 ---------- */
+/* ---------- 렌더 ---------- */
 function cardHTML(c){
   if(!c) return "";
-  if(c.joker) return `<div class="big jokerLabel">JOKER</div>`;
-  return `<div class="big">${c.rank}${c.suit}</div>`;
+  return c.joker ? `<div class="big jokerLabel">JOKER</div>` : `<div class="big">${c.rank}${c.suit}</div>`;
 }
 function inExchange(phase){ return phase==="flop-exchange" || phase==="turn-exchange" || phase==="river-exchange"; }
 
 function renderFromState(S){
-  if(isLocal) return; // (옵션) 로컬 모드일 경우 무시
+  if(isLocal) return;
   const youId = myId || socket?.id;
   const oppId = S.players.find(p=>p!==youId) || S.players[0];
 
   $("phaseText").textContent = S.phaseLabel;
   $("roundText").textContent = `(Round ${S.round})`;
 
-  // 턴 라이트
   const ex = inExchange(S.phase);
   const myTurn = ex && S.turn === youId;
   $("p1Light").classList.toggle("on", !!myTurn);
   $("p2Light").classList.toggle("on", ex && !myTurn);
 
-  // 결과 라인 유지/초기화
   if(!ex && S.phase!=="showdown") $("resultLine").textContent = "";
 
-  // 상대 패 (쇼다운 단계 또는 forceReveal이면 오픈)
   const opp = $("oppHand"); opp.innerHTML="";
   const revealOpp = (S.phase==="showdown") || forceReveal;
   (S.hands[oppId]||[]).forEach(c=>{
     opp.insertAdjacentHTML("beforeend", `<div class="card ${revealOpp?'face':'back'}">${revealOpp?cardHTML(c):""}</div>`);
   });
 
-  // 내 패
   const hand = $("hand"); hand.innerHTML="";
   (S.hands[youId]||[]).forEach((c,i)=>{
     const sel = selection.has(i) ? "selected" : "";
     hand.insertAdjacentHTML("beforeend", `<div class="card face ${sel}" data-idx="${i}">${cardHTML(c)}</div>`);
   });
 
-  // 공유 카드
   const cells = [...document.querySelectorAll("#shared .card")];
   for(let i=0;i<5;i++){
     const cc = S.community[i];
@@ -273,31 +266,31 @@ function renderFromState(S){
     else{ cells[i].className="card face"; cells[i].innerHTML=cardHTML(cc); }
   }
 
-  // 버튼/선택 제어
   const btn = $("btnReady");
+  const rc = $("readyCount");
+  if(rc){
+    const readyNum = S.players.reduce((n,p)=> n + (S.ready?.[p] ? 1 : 0), 0);
+    rc.textContent = `${readyNum}/${S.players.length} Ready`;
+  }
+
   if(ex){
     const canEx = !!S.canExchange[youId];
     btn.textContent = "Exchange / Done";
     btn.disabled = !canEx;
 
-    selection = canEx ? selection : new Set(); // 내 턴 아닐 땐 선택 클리어
-    // 클릭 선택 (최대 2장)
+    selection = canEx ? selection : new Set();
     if(canEx){
       hand.querySelectorAll(".card").forEach(el=>{
         el.onclick = ()=>{
           const idx = Number(el.dataset.idx);
           if(selection.has(idx)){ selection.delete(idx); el.classList.remove("selected"); }
-          else{
-            if(selection.size>=2) return;
-            selection.add(idx); el.classList.add("selected");
-          }
+          else{ if(selection.size>=2) return; selection.add(idx); el.classList.add("selected"); }
         };
       });
       btn.onclick = ()=>{
         const indices = Array.from(selection.values());
-        socket.emit("exchange:request", { roomId: currentRoomId, indices }); // 0장도 허용(스킵)
-        btn.disabled = true; // 중복 방지
-        // 제출 즉시 선택 리셋
+        socket.emit("exchange:request", { roomId: currentRoomId, indices });
+        btn.disabled = true;
         selection.clear();
       };
     }else{
@@ -305,21 +298,21 @@ function renderFromState(S){
       btn.onclick = null;
     }
   }else{
-    // 비교환 페이즈: 버튼 비활성
-    $("btnReady").textContent = "Ready";
-    $("btnReady").disabled = true;
-    $("btnReady").onclick = null;
+    btn.textContent = "Ready";
+    const iAmReady = !!S.ready?.[youId];
+    btn.disabled = iAmReady ? true : !S.allowReady?.[youId];
+    btn.onclick = ()=>{
+      if(btn.disabled) return;
+      socket.emit("player:ready", { roomId: currentRoomId });
+      btn.disabled = true;
+    };
+    $("hand").querySelectorAll(".card").forEach(el=> el.onclick=null);
     selection.clear();
-    hand.querySelectorAll(".card").forEach(el=> el.onclick=null);
   }
 
-  // 쇼다운 진입 시 강제 공개 플래그 on (결과 이벤트가 곧 온다)
   if(S.phase==="showdown"){ forceReveal = true; }
-  // 새 라운드(deal)면 강제 공개 off
   if(S.phase==="deal"){ forceReveal = false; }
 
-  // 항시 이름 유지
-  // (room:ready에서 이미 세팅되지만 방어적으로 둠)
   $("nameYou").textContent ||= "YOU";
   $("nameOpp").textContent ||= "OPP";
 }
@@ -328,43 +321,35 @@ function renderFromState(S){
 function onRoundResult(payload){
   const { tie, winner, loser, winnerName, loserName, eval:ev } = payload;
   const you = myId || socket?.id;
-
   let msg="";
   if(tie){
     msg = `TIE — ${ev?.a?.name} vs ${ev?.b?.name}`;
   }else{
-    const iWin = (winner===you);
     const wName = winnerName || "Winner";
     const lName = loserName || "Loser";
-    msg = `${wName} wins (${(winner===you)?"YOU":wName}: ${ev?.a?.score? (winner===you?ev?.a?.name:ev?.b?.name):""}) — ${lName} (${(winner===you)?"OPP":"YOU"})`;
-    if (ev?.a?.name && ev?.b?.name && !msg.includes("wins (")) {
-      // 안전하게 양쪽 족보 병기
-      msg = `${wName} wins — ${ev?.a?.name} vs ${ev?.b?.name}`;
-    }
+    msg = `${wName} wins — ${ev?.a?.name ?? ""} vs ${ev?.b?.name ?? ""}`;
   }
   $("resultLine").textContent = msg;
 }
 
 /* ---------- 러시안 룰렛 ---------- */
-const holesRef = []; // index -> hole Element
+const holesRef = [];
 let drumSized = false;
 
 function ensureDrum(){
   const drum = $("drum");
   if(drumSized && holesRef.length===6) return;
-
-  // 초기화
   drum.innerHTML = `<div class="centerDot"></div>`;
   holesRef.length = 0;
 
   const rect = drum.getBoundingClientRect();
   const W = rect.width; const H = rect.height;
   const cx = W/2, cy = H/2;
-  const r = Math.min(W,H)*0.35; // 원주 반경
+  const r = Math.min(W,H)*0.35;
   const holeSize = Math.min(W,H)*0.2;
 
   for(let i=0;i<6;i++){
-    const angleDeg = -90 + i*60; // 0 index가 위쪽
+    const angleDeg = -90 + i*60;
     const rad = angleDeg * Math.PI / 180;
     const x = cx + r*Math.cos(rad) - holeSize/2;
     const y = cy + r*Math.sin(rad) - holeSize/2;
@@ -378,7 +363,6 @@ function ensureDrum(){
   }
   drumSized = true;
 }
-
 window.addEventListener("resize", ()=>{ drumSized=false; ensureDrum(); });
 
 function clearBullets(){
@@ -388,12 +372,10 @@ function clearBullets(){
     if(b) b.remove();
   });
 }
-
 function spinDrumTo(selected, bullets, fired){
   ensureDrum();
   clearBullets();
 
-  // 총알 표시
   bullets.forEach(i=>{
     if(holesRef[i] && !holesRef[i].querySelector(".bullet")){
       const bb = document.createElement("div");
@@ -402,32 +384,24 @@ function spinDrumTo(selected, bullets, fired){
     }
   });
 
-  // 회전
   const drum = $("drum");
   const STEP = 60;
-  const base = 720 + Math.floor(Math.random()*360); // 2~3회전 + 랜덤
+  const base = 720 + Math.floor(Math.random()*360);
   const target = base - (selected*STEP);
   requestAnimationFrame(()=>{ drum.style.transform = `rotate(${target}deg)`; });
 
-  // 하이라이트 & 효과
   setTimeout(()=>{
     holesRef[selected]?.classList.add("selected");
     const info = $("rouletteInfo");
-    if(fired){
-      flashScreen();
-      info.textContent = "BANG! — unlucky...";
-    }else{
-      info.textContent = "Click... alive.";
-    }
+    if(fired){ flashScreen(); info.textContent = "BANG! — unlucky..."; }
+    else{ info.textContent = "Click... alive."; }
   }, 2300);
 }
 function flashScreen(){
   const f = $("flash");
-  f.classList.remove("flashOnce");
-  void f.offsetWidth; // reflow
+  f.classList.remove("flashOnce"); void f.offsetWidth;
   f.classList.add("flashOnce");
 }
-
 function onRouletteSpin({ loser, bullets, selected, fired, round }){
   const you = myId || socket?.id;
   const iLose = (loser===you);
@@ -447,62 +421,42 @@ $("btnSurrender").onclick = ()=>{
   if(currentRoomId) socket?.emit("leaveRoom", { roomId: currentRoomId });
   location.reload();
 };
-
-$("btnCopy").onclick = ()=>{
-  const v = $("roomCode").value.trim();
-  if(v) navigator.clipboard.writeText(v);
-};
+$("btnCopy").onclick = ()=>{ const v=$("roomCode").value.trim(); if(v) navigator.clipboard.writeText(v); };
 
 /* ---------- 매칭 버튼 ---------- */
-const randomAINick = ()=>{
-  const a=["Swift","Silent","Cool","Neon","Crimson","Azure","Lucky","Wild","Ghost","Iron","Rapid","Mellow","Classic","Turbo","Cosmic"];
-  const b=["Raven","Wolf","Tiger","Hawk","Viper","Falcon","Panda","Otter","Lynx","Cobra","Eagle","Shark","Bison","Koala","Gecko"];
-  return `${a[Math.floor(Math.random()*a.length)]}_${b[Math.floor(Math.random()*a.length)]}_${Math.floor(Math.random()*90+10)}`;
-};
-
 $("btnQuick").onclick = async ()=>{
   const nick = getNick();
   const healthy = await serverHealthy().catch(()=>false);
-
-  if(!healthy){
-    // 오프라인 폴백 모드(선택): 서버 없이 싱글로 시작
-    alert("Server offline. Local mode not supported in full flow build. Please start the server.");
-    return;
-  }
+  if(!healthy){ alert("Server offline. Please start the server."); return; }
 
   initSocket();
   socket.emit("qm:join", { nick });
   show("connecting");
 
-  let t = 12; $("count").textContent = t;
+  let t=12; $("count").textContent=t;
   matchTimer = setInterval(()=>{
-    t--; $("count").textContent = t;
+    t--; $("count").textContent=t;
     if(t<=0){
       clearInterval(matchTimer); matchTimer=null;
       socket.emit("qm:leave");
-      // 폴백 싱글 모드가 필요한 경우 여기에 붙일 수 있음
       alert("No opponent found. Try Create/Join to play with a friend.");
       location.reload();
     }
-  }, 1000);
+  },1000);
 };
-
 $("btnCreate").onclick = async ()=>{
   const healthy = await serverHealthy().catch(()=>false);
   if(!healthy){ alert("Server is offline."); refreshServerDot(); return; }
-  initSocket();
-  socket.emit("room:create", { nick:getNick() });
+  initSocket(); socket.emit("room:create", { nick:getNick() });
 };
 $("btnJoin").onclick = async ()=>{
   const healthy = await serverHealthy().catch(()=>false);
   if(!healthy){ alert("Server is offline."); refreshServerDot(); return; }
-  const code = $("joinCode").value.trim().toUpperCase();
-  if(!code) return alert("Enter room code.");
-  initSocket();
-  socket.emit("room:join", { roomId:code, nick:getNick() });
+  const code=$("joinCode").value.trim().toUpperCase(); if(!code) return alert("Enter room code.");
+  initSocket(); socket.emit("room:join", { roomId:code, nick:getNick() });
 };
 
-/* ---------- Service Worker (optional) ---------- */
+/* ---------- SW (optional) ---------- */
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=> navigator.serviceWorker.register('sw.js').catch(()=>{}));
 }
