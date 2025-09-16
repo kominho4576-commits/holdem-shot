@@ -184,6 +184,25 @@ input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6
 <script>
 // ===== Utilities =====
 const $=id=>document.getElementById(id);
+
+// ✅ Render 서버 주소(고정)
+const API_BASE = "https://holdem-shot.onrender.com";
+
+function checkServer(){
+  fetch(`${API_BASE}/health`)
+    .then(r=>{
+      if(r.ok) $('srvDot').classList.add('on');
+      else $('srvDot').classList.remove('on');
+    })
+    .catch(()=>$('srvDot').classList.remove('on'));
+}
+
+// 초기 1회 체크 + Retry 버튼
+window.addEventListener('DOMContentLoaded', ()=>{
+  checkServer();
+  $('retry').onclick = (e)=>{ e.preventDefault(); checkServer(); };
+});
+
 const screens=["home","connecting","play","victory","defeat"];
 function show(n){
   screens.forEach(s=>{
@@ -209,16 +228,15 @@ if('serviceWorker' in navigator){
 ["btnQuick","btnCreate","btnJoin"].forEach(id=>$(id).addEventListener('click',()=>{
   startConnectingThenAI(getNick());
 }));
-$("retry").onclick=()=>fetch('/health').then(r=>r.ok?$("srvDot").classList.add('on'):null).catch(()=>{});
 function getNick(){ return ($("nickname").value.trim()||"PLAYER"); }
 
 // ===== Cards / Poker helpers =====
 const SUITS=["♠","♥","♦","♣"], RANKS=["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
-const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j]]}return a};
 const deal=(d,n)=>d.splice(0,n);
 const deckNew=_=>{const d=[]; for(const s of SUITS){ for(const r of RANKS){ d.push({rank:r,suit:s}); } } d.push({joker:true}); d.push({joker:true}); return d;};
 
-// ***** New: 7 -> best 5 evaluation with wrap straight *****
+// ***** 7 -> best 5 evaluation with wrap straight *****
 const RANK_ORDER = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
 const RANK_TO_I = Object.fromEntries(RANK_ORDER.map((r,i)=>[r,i]));
 
@@ -514,11 +532,11 @@ const Game=(()=>{
 
         if(hit){
           if(loserIsYou){
-            flash('red');
+            const f=$("flash"); f.style.background='rgba(255,0,0,0.25)'; f.classList.remove("flashOnce"); void f.offsetWidth; f.classList.add("flashOnce");
             $("dwinName").textContent = S.opp.name; $("dloseName").textContent = S.you.name;
             show("defeat"); backHomeIn('defBack',5,true);
           }else{
-            flash('white');
+            const f=$("flash"); f.style.background='rgba(255,255,255,0.6)'; f.classList.remove("flashOnce"); void f.offsetWidth; f.classList.add("flashOnce");
             $("winName").textContent = S.you.name; $("loseName").textContent = S.opp.name;
             show("victory"); backHomeIn('vicBack',5,true);
           }
