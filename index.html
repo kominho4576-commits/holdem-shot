@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
@@ -10,7 +10,8 @@
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" defer></script>
 <style>
 :root{ --ink:#7c6cf4; --line:#c7c1ff; --soft:#e7e3ff; }
-*{box-sizing:border-box} html,body{height:100%;margin:0;background:#fff;color:var(--ink);font-family:system-ui,-apple-system,"Apple SD Gothic Neo",Segoe UI,Roboto,Helvetica,Arial,"Noto Sans KR",sans-serif}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:#fff;color:var(--ink);font-family:system-ui,-apple-system,"Apple SD Gothic Neo",Segoe UI,Roboto,Helvetica,Arial,"Noto Sans KR",sans-serif}
 button{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6rem 1rem; border-radius:18px; font-weight:900; cursor:pointer; box-shadow:0 0 0 3px var(--soft) inset}
 button:disabled{opacity:.5;cursor:not-allowed}
 input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6rem 1rem; border-radius:18px; font-weight:800; width:100%; box-shadow:0 0 0 3px var(--soft) inset}
@@ -24,7 +25,8 @@ input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6
 .dot.on{background:#2ecc71}
 .retry{font-size:.9rem;text-decoration:underline;cursor:pointer}
 .helper{margin-top:10px;opacity:.85;font-size:.9rem}
-.screen{display:none} .screen.active{display:block}
+.screen{display:none}
+.screen.active{display:block}
 
 /* PLAY */
 .wrap{min-height:100vh;display:grid;grid-template-columns:1fr 2px 0.78fr;gap:0}
@@ -41,7 +43,6 @@ input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6
 .card{width:130px; aspect-ratio:2.5/3.5; border:5px solid var(--line); border-radius:14px; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:42px; color:var(--ink); background:#fff; position:relative; overflow:hidden; box-shadow:0 0 0 3px var(--soft) inset; user-select:none; transition:.1s; text-align:center}
 .card .big{font-size:42px; line-height:1; }
 .card .big.jokerLabel{ font-size:28px; letter-spacing:1px; }
-.card .tagJoker{ font-size:15px; opacity:.75; margin-top:6px }
 .back::before{content:""; position:absolute; inset:0; background:repeating-linear-gradient(45deg, rgba(124,108,244,.45) 0 10px, rgba(124,108,244,.15) 10px 20px); opacity:.85;}
 .face{background:linear-gradient(180deg,#fff 70%, rgba(124,108,244,.08));}
 .handBottom{position:absolute; left:60px; bottom:120px; display:flex; gap:22px; align-items:center; z-index:5;}
@@ -61,9 +62,9 @@ input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6
 .card.selected{outline:4px solid var(--ink); box-shadow:0 0 0 3px var(--ink) inset}
 .card.selected-opp{outline:4px dashed var(--ink);}
 #rotate{position:fixed; inset:0; background:#fff; color:#7c6cf4; display:none; align-items:center; justify-content:center; text-align:center; padding:24px; z-index:1000;}
-#flash{position:fixed; pointer-events:none; inset:0; background:rgba(255,0,0,0.25); opacity:0; z-index:999; }
+#flash{position:fixed; pointer-events:none; inset:0; background:rgba(255,0,0,0.28); opacity:0; z-index:999; }
 @keyframes flash1 { 0%{opacity:0} 15%{opacity:1} 100%{opacity:0} }
-.flashOnce{ animation: flash1 200ms ease-out 1; }
+.flashOnce{ animation: flash1 220ms ease-out 1; }
 .spinner{width:40px;height:40px;border:5px solid var(--soft);border-top-color:var(--ink);border-radius:50%;animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 </style>
@@ -74,12 +75,14 @@ input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6
 <script>
 const API_BASE = "https://holdem-shot.onrender.com";
 let socket = null;
-let matchTimer = null;
 let myId = null;
+let matchTimer = null;
 let currentRoomId = null;
-let isLocal = false; // 로컬(AI) 모드 여부
+let isLocal = false; // (옵션) 오프라인 폴백
+let selection = new Set(); // 내 교환 선택 인덱스(최대 2)
+let forceReveal = false;   // 쇼다운 이후 다음 라운드 시작 전까지 상대패 강제 공개
 
-// ========== UI ==========
+/* ---------- UI 초기화 ---------- */
 const app = document.getElementById("app");
 app.innerHTML = `
   <div id="screen-home" class="screen active" aria-hidden="false">
@@ -140,7 +143,7 @@ app.innerHTML = `
           <button id="btnSurrender">Surrender</button>
         </div>
 
-        <div class="p1"><span id="nameYou">PLAYER</span> <span class="light on" id="p1Light"></span></div>
+        <div class="p1"><span id="nameYou">PLAYER</span> <span class="light" id="p1Light"></span></div>
       </section>
       <div class="divider"></div>
       <section class="roulette" id="roulette">
@@ -159,46 +162,46 @@ app.innerHTML = `
   <div id="flash"></div>
 `;
 
-const $ = (id) => document.getElementById(id);
-const show = (n) => {
+const $ = (id)=>document.getElementById(id);
+const show = (n)=>{
   ["home","connecting","play"].forEach(s=>{
     const on = (s===n);
     $("screen-"+s).classList.toggle("active", on);
     $("screen-"+s).setAttribute("aria-hidden", on? "false":"true");
   });
 };
-const getNick = ()=> ($("nickname").value.trim()||"PLAYER");
+const getNick = ()=> ($("nickname").value.trim() || "PLAYER");
 
-// --------- 서버 상태 ----------
+/* ---------- 서버 핑 + 소켓 ---------- */
 async function serverHealthy(timeoutMs=2000){
   try{
-    const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),timeoutMs);
-    const r=await fetch(`${API_BASE}/health`,{signal:ctrl.signal,cache:"no-store"});
-    clearTimeout(t);
+    const ctrl = new AbortController();
+    const timer = setTimeout(()=>ctrl.abort(), timeoutMs);
+    const r = await fetch(`${API_BASE}/health`, { signal: ctrl.signal, cache: "no-store" });
+    clearTimeout(timer);
     if(!r.ok) return false;
-  }catch(e){ return false; }
+  }catch(_){ return false; }
   try{
     await new Promise((res,rej)=>{
       const s = io(API_BASE,{transports:["websocket","polling"],timeout:timeoutMs,forceNew:true,autoConnect:true});
-      const ok = ()=>{ s.disconnect(); res(true); };
-      const bad = (err)=>{ try{s.disconnect();}catch{}; rej(err); };
+      const ok = ()=>{ try{s.disconnect();}catch{}; res(true); };
+      const bad = ()=>{ try{s.disconnect();}catch{}; rej(new Error("connect_error")); };
       s.once("connect", ok); s.once("connect_error", bad);
-      setTimeout(()=>bad(new Error("timeout")), timeoutMs);
+      setTimeout(bad, timeoutMs);
     });
     return true;
-  }catch(e){ return false; }
+  }catch(_){ return false; }
 }
-async function refreshServerDot(){ const ok = await serverHealthy(); $("srvDot").classList.toggle("on", ok); }
+async function refreshServerDot(){ $("srvDot").classList.toggle("on", await serverHealthy()); }
 refreshServerDot(); $("retry").onclick=(e)=>{ e.preventDefault(); refreshServerDot(); };
 
-// --------- Socket ----------
 function initSocket(){
   if (socket && socket.connected) return;
   socket = io(API_BASE, { transports:["websocket","polling"] });
 
   socket.on("connect", ()=>{ myId = socket.id; });
 
-  // 매칭/룸
+  /* ---- 매칭/룸 ---- */
   socket.on("qm:queued", ()=>{});
   socket.on("qm:found", ({roomId, opponentNick, youNick})=>{
     if(matchTimer){ clearInterval(matchTimer); matchTimer=null; }
@@ -206,186 +209,303 @@ function initSocket(){
     startPlayUI(youNick||getNick(), opponentNick||"PLAYER2");
   });
   socket.on("room:created", ({roomId})=>{ $("roomCode").value = roomId; });
-  socket.on("room:ready", ({roomId,opponentNick, youNick})=>{
+  socket.on("room:ready", ({roomId, opponentNick, youNick})=>{
     currentRoomId = roomId;
     startPlayUI(youNick||getNick(), opponentNick||"PLAYER2");
   });
   socket.on("room:error", ({message})=> alert(message||"Room error"));
-  socket.on("room:peer-left", ()=> { alert("Opponent left."); location.reload(); });
+  socket.on("room:peer-left", ()=>{ alert("Opponent left."); location.reload(); });
 
-  // ===== 게임 상태 렌더 =====
-  socket.on("game:state", (S)=>{
-    if(isLocal) return;
+  /* ---- 게임 상태 렌더 ---- */
+  socket.on("game:state", renderFromState);
 
-    const youId = myId;
-    const oppId = S.players.find(p=>p!==youId);
+  /* ---- 쇼다운 결과 ---- */
+  socket.on("round:result", onRoundResult);
 
-    $("phaseText").textContent = S.phaseLabel;
-    $("roundText").textContent = `(Round ${S.round})`;
+  /* ---- 러시안 룰렛 ---- */
+  socket.on("roulette:spin", onRouletteSpin);
+}
 
-    const myTurn = S.turn === youId && (S.phase==="flop-exchange" || S.phase==="turn-exchange");
-    $("p1Light").classList.toggle("on", myTurn);
-    $("p2Light").classList.toggle("on", !myTurn && (S.phase==="flop-exchange" || S.phase==="turn-exchange"));
+/* ---------- 렌더링 ---------- */
+function cardHTML(c){
+  if(!c) return "";
+  if(c.joker) return `<div class="big jokerLabel">JOKER</div>`;
+  return `<div class="big">${c.rank}${c.suit}</div>`;
+}
+function inExchange(phase){ return phase==="flop-exchange" || phase==="turn-exchange" || phase==="river-exchange"; }
 
-    // 상대 패
-    const opp = $("oppHand"); opp.innerHTML="";
-    const revealOpp = (S.phase === "showdown");
-    (S.hands[oppId] || []).forEach(c=>{
-      opp.insertAdjacentHTML("beforeend", `<div class="card ${revealOpp?'face':'back'}">${revealOpp?cardHTML(c):""}</div>`);
-    });
+function renderFromState(S){
+  if(isLocal) return; // (옵션) 로컬 모드일 경우 무시
+  const youId = myId || socket?.id;
+  const oppId = S.players.find(p=>p!==youId) || S.players[0];
 
-    // 내 패
-    const hand = $("hand"); hand.innerHTML="";
-    (S.hands[youId] || []).forEach((c,idx)=>{
-      hand.insertAdjacentHTML("beforeend", `<div class="card face" data-idx="${idx}">${cardHTML(c)}</div>`);
-    });
+  $("phaseText").textContent = S.phaseLabel;
+  $("roundText").textContent = `(Round ${S.round})`;
 
-    // 공유
-    const cells=[...document.querySelectorAll("#shared .card")];
-    for(let i=0;i<5;i++){
-      const cc = S.community[i];
-      if(!cc || cc.back){ cells[i].className="card back"; cells[i].innerHTML=""; }
-      else{ cells[i].className="card face"; cells[i].innerHTML=cardHTML(cc); }
-    }
+  // 턴 라이트
+  const ex = inExchange(S.phase);
+  const myTurn = ex && S.turn === youId;
+  $("p1Light").classList.toggle("on", !!myTurn);
+  $("p2Light").classList.toggle("on", ex && !myTurn);
 
-    const inExchange = (S.phase === "flop-exchange" || S.phase === "turn-exchange");
-    const canExchange = inExchange && !!S.canExchange[youId]; // 서버가 준 권한 기준
-    const btn = $("btnReady");
-    btn.textContent = inExchange ? "Exchange / Done" : "Ready";
-    btn.disabled = inExchange ? !canExchange : !S.allowReady[youId];
+  // 결과 라인 유지/초기화
+  if(!ex && S.phase!=="showdown") $("resultLine").textContent = "";
 
-    // 선택 로직 (교환 턴일 때만)
-    let selected = new Set();
-    if(canExchange){
+  // 상대 패 (쇼다운 단계 또는 forceReveal이면 오픈)
+  const opp = $("oppHand"); opp.innerHTML="";
+  const revealOpp = (S.phase==="showdown") || forceReveal;
+  (S.hands[oppId]||[]).forEach(c=>{
+    opp.insertAdjacentHTML("beforeend", `<div class="card ${revealOpp?'face':'back'}">${revealOpp?cardHTML(c):""}</div>`);
+  });
+
+  // 내 패
+  const hand = $("hand"); hand.innerHTML="";
+  (S.hands[youId]||[]).forEach((c,i)=>{
+    const sel = selection.has(i) ? "selected" : "";
+    hand.insertAdjacentHTML("beforeend", `<div class="card face ${sel}" data-idx="${i}">${cardHTML(c)}</div>`);
+  });
+
+  // 공유 카드
+  const cells = [...document.querySelectorAll("#shared .card")];
+  for(let i=0;i<5;i++){
+    const cc = S.community[i];
+    if(!cc || cc.back){ cells[i].className="card back"; cells[i].innerHTML=""; }
+    else{ cells[i].className="card face"; cells[i].innerHTML=cardHTML(cc); }
+  }
+
+  // 버튼/선택 제어
+  const btn = $("btnReady");
+  if(ex){
+    const canEx = !!S.canExchange[youId];
+    btn.textContent = "Exchange / Done";
+    btn.disabled = !canEx;
+
+    selection = canEx ? selection : new Set(); // 내 턴 아닐 땐 선택 클리어
+    // 클릭 선택 (최대 2장)
+    if(canEx){
       hand.querySelectorAll(".card").forEach(el=>{
         el.onclick = ()=>{
           const idx = Number(el.dataset.idx);
-          if(selected.has(idx)) selected.delete(idx);
-          else{ if(selected.size>=2) return; selected.add(idx); }
-          el.classList.toggle("selected");
+          if(selection.has(idx)){ selection.delete(idx); el.classList.remove("selected"); }
+          else{
+            if(selection.size>=2) return;
+            selection.add(idx); el.classList.add("selected");
+          }
         };
       });
       btn.onclick = ()=>{
-        const indices = Array.from(selected.values());
-        socket.emit("exchange:request", { roomId: currentRoomId, indices }); // 0장도 허용 → 스킵
-        btn.disabled = true; // 중복 입력 방지
+        const indices = Array.from(selection.values());
+        socket.emit("exchange:request", { roomId: currentRoomId, indices }); // 0장도 허용(스킵)
+        btn.disabled = true; // 중복 방지
+        // 제출 즉시 선택 리셋
+        selection.clear();
       };
     }else{
-      // 비교환 페이즈 or 내 턴이 아닐 때
-      btn.onclick = ()=>{
-        if(!inExchange){
-          socket.emit("player:ready", { roomId: currentRoomId });
-        }
-      };
+      hand.querySelectorAll(".card").forEach(el=> el.onclick=null);
+      btn.onclick = null;
     }
+  }else{
+    // 비교환 페이즈: 버튼 비활성
+    $("btnReady").textContent = "Ready";
+    $("btnReady").disabled = true;
+    $("btnReady").onclick = null;
+    selection.clear();
+    hand.querySelectorAll(".card").forEach(el=> el.onclick=null);
+  }
 
-    $("btnSurrender").onclick = ()=>{
-      if(currentRoomId) socket.emit("leaveRoom", { roomId: currentRoomId });
-      location.reload();
-    };
+  // 쇼다운 진입 시 강제 공개 플래그 on (결과 이벤트가 곧 온다)
+  if(S.phase==="showdown"){ forceReveal = true; }
+  // 새 라운드(deal)면 강제 공개 off
+  if(S.phase==="deal"){ forceReveal = false; }
+
+  // 항시 이름 유지
+  // (room:ready에서 이미 세팅되지만 방어적으로 둠)
+  $("nameYou").textContent ||= "YOU";
+  $("nameOpp").textContent ||= "OPP";
+}
+
+/* ---------- 쇼다운 결과 ---------- */
+function onRoundResult(payload){
+  const { tie, winner, loser, winnerName, loserName, eval:ev } = payload;
+  const you = myId || socket?.id;
+
+  let msg="";
+  if(tie){
+    msg = `TIE — ${ev?.a?.name} vs ${ev?.b?.name}`;
+  }else{
+    const iWin = (winner===you);
+    const wName = winnerName || "Winner";
+    const lName = loserName || "Loser";
+    msg = `${wName} wins (${(winner===you)?"YOU":wName}: ${ev?.a?.score? (winner===you?ev?.a?.name:ev?.b?.name):""}) — ${lName} (${(winner===you)?"OPP":"YOU"})`;
+    if (ev?.a?.name && ev?.b?.name && !msg.includes("wins (")) {
+      // 안전하게 양쪽 족보 병기
+      msg = `${wName} wins — ${ev?.a?.name} vs ${ev?.b?.name}`;
+    }
+  }
+  $("resultLine").textContent = msg;
+}
+
+/* ---------- 러시안 룰렛 ---------- */
+const holesRef = []; // index -> hole Element
+let drumSized = false;
+
+function ensureDrum(){
+  const drum = $("drum");
+  if(drumSized && holesRef.length===6) return;
+
+  // 초기화
+  drum.innerHTML = `<div class="centerDot"></div>`;
+  holesRef.length = 0;
+
+  const rect = drum.getBoundingClientRect();
+  const W = rect.width; const H = rect.height;
+  const cx = W/2, cy = H/2;
+  const r = Math.min(W,H)*0.35; // 원주 반경
+  const holeSize = Math.min(W,H)*0.2;
+
+  for(let i=0;i<6;i++){
+    const angleDeg = -90 + i*60; // 0 index가 위쪽
+    const rad = angleDeg * Math.PI / 180;
+    const x = cx + r*Math.cos(rad) - holeSize/2;
+    const y = cy + r*Math.sin(rad) - holeSize/2;
+    const hole = document.createElement("div");
+    hole.className = "hole";
+    hole.style.width = hole.style.height = holeSize+"px";
+    hole.style.left = x+"px";
+    hole.style.top  = y+"px";
+    drum.appendChild(hole);
+    holesRef.push(hole);
+  }
+  drumSized = true;
+}
+
+window.addEventListener("resize", ()=>{ drumSized=false; ensureDrum(); });
+
+function clearBullets(){
+  holesRef.forEach(h=>{
+    h.classList.remove("selected");
+    const b = h.querySelector(".bullet");
+    if(b) b.remove();
   });
 }
 
-// 유틸들
-const SUITS=["♠","♥","♦","♣"], RANKS=["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
-const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
-const deckNew=_=>{const d=[]; for(const s of SUITS){ for(const r of RANKS){ d.push({rank:r,suit:s}); } } d.push({joker:true}); d.push({joker:true}); return d;};
-function cardHTML(c){ if(!c) return ""; return c.joker?`<div class="big jokerLabel">JOKER</div>`:`<div class="big">${c.rank}${c.suit}</div>`; }
-const randomAINick = ()=>{ const a=["Swift","Silent","Cool","Neon","Crimson","Azure","Lucky","Wild","Ghost","Iron","Rapid","Mellow","Classic","Turbo","Cosmic"]; const b=["Raven","Wolf","Tiger","Hawk","Viper","Falcon","Panda","Otter","Lynx","Cobra","Eagle","Shark","Bison","Koala","Gecko"]; return `${a[Math.floor(Math.random()*a.length)]}_${b[Math.floor(Math.random()*b.length)]}_${Math.floor(Math.random()*90+10)}`; };
+function spinDrumTo(selected, bullets, fired){
+  ensureDrum();
+  clearBullets();
 
-// 로컬(AI) 모드 (기존과 동일, 생략 없이 동작)
-const LocalGame = (()=>{
-  const S={ you:{name:"PLAYER",hand:[]}, opp:{name:"AI",hand:[]}, shared:[], deck:[], phase:"Dealing", round:1 };
-  const state = { mySel:new Set() };
-  function setPhase(p){ S.phase=p; $("phaseText").textContent=p; $("roundText").textContent=`(Round ${S.round})`; }
-  function drawNonJoker(){ let c=S.deck.shift(); while(c && c.joker){ S.deck.push({joker:true}); S.deck=shuffle(S.deck); c=S.deck.shift(); } return c; }
-  function render(){
-    $("p1Light").classList.add("on"); $("p2Light").classList.remove("on");
-    const opp=$("oppHand"); opp.innerHTML="";
-    const revealOpp = (S.phase==="Showdown");
-    S.opp.hand.forEach(c=> opp.insertAdjacentHTML("beforeend", `<div class="card ${revealOpp?'face':'back'}">${revealOpp?cardHTML(c):""}</div>`));
-    const hand=$("hand"); hand.innerHTML="";
-    S.you.hand.forEach((c,i)=> hand.insertAdjacentHTML("beforeend", `<div class="card face ${state.mySel.has(i)?'selected':''}" data-idx="${i}">${cardHTML(c)}</div>`));
-    hand.querySelectorAll(".card").forEach(el=>{
-      el.onclick=()=>{
-        const canSelect = (S.phase==="Flop"||S.phase==="Turn");
-        if(!canSelect) return;
-        const i=Number(el.dataset.idx);
-        if(state.mySel.has(i)) state.mySel.delete(i);
-        else{ if(state.mySel.size>=2) return; state.mySel.add(i); }
-        el.classList.toggle("selected");
-      }
-    });
-    const cells=[...document.querySelectorAll("#shared .card")];
-    S.shared.forEach((c,i)=>{
-      cells[i].className="card "+(c.back?"back":"face");
-      cells[i].innerHTML=c.back?"":cardHTML(c);
-    });
-    $("btnReady").disabled = !(S.phase==="Flop"||S.phase==="Turn"||S.phase==="River");
-  }
-  function nextPhase(){
-    if(S.phase==="Dealing"){ setPhase("Flop"); S.shared[0]=drawNonJoker(); S.shared[1]=drawNonJoker(); S.shared[2]=drawNonJoker(); render(); }
-    else if(S.phase==="Flop"){ setPhase("Turn"); if(state.mySel.size>0){ for(const idx of state.mySel){ S.you.hand[idx]=S.deck.shift(); } state.mySel.clear(); } S.shared[3]=drawNonJoker(); render(); }
-    else if(S.phase==="Turn"){ setPhase("River"); if(state.mySel.size>0){ for(const idx of state.mySel){ S.you.hand[idx]=S.deck.shift(); } state.mySel.clear(); } S.shared[4]=drawNonJoker(); render(); }
-    else if(S.phase==="River"){ setPhase("Showdown"); render(); }
-  }
-  function newRound(){
-    S.deck=shuffle(deckNew());
-    S.shared=[{back:true},{back:true},{back:true},{back:true},{back:true}];
-    S.you.hand=[S.deck.shift(),S.deck.shift()];
-    S.opp.hand=[S.deck.shift(),S.deck.shift()];
-    setPhase("Dealing"); render(); setTimeout(nextPhase, 700);
-  }
-  $("btnReady").onclick=()=> nextPhase();
-  $("btnSurrender").onclick=()=> location.reload();
-  function start(nickYou,nickOpp){ $("nameYou").textContent = nickYou||"PLAYER"; $("nameOpp").textContent = nickOpp||"AI"; isLocal = true; show("play"); newRound(); }
-  return { start };
-})();
+  // 총알 표시
+  bullets.forEach(i=>{
+    if(holesRef[i] && !holesRef[i].querySelector(".bullet")){
+      const bb = document.createElement("div");
+      bb.className = "bullet";
+      holesRef[i].appendChild(bb);
+    }
+  });
 
-function startPlayUI(nickYou, nickOpp){ $("nameYou").textContent = nickYou; $("nameOpp").textContent = nickOpp; show("play"); }
+  // 회전
+  const drum = $("drum");
+  const STEP = 60;
+  const base = 720 + Math.floor(Math.random()*360); // 2~3회전 + 랜덤
+  const target = base - (selected*STEP);
+  requestAnimationFrame(()=>{ drum.style.transform = `rotate(${target}deg)`; });
 
-// ======== 버튼 바인딩 ========
+  // 하이라이트 & 효과
+  setTimeout(()=>{
+    holesRef[selected]?.classList.add("selected");
+    const info = $("rouletteInfo");
+    if(fired){
+      flashScreen();
+      info.textContent = "BANG! — unlucky...";
+    }else{
+      info.textContent = "Click... alive.";
+    }
+  }, 2300);
+}
+function flashScreen(){
+  const f = $("flash");
+  f.classList.remove("flashOnce");
+  void f.offsetWidth; // reflow
+  f.classList.add("flashOnce");
+}
+
+function onRouletteSpin({ loser, bullets, selected, fired, round }){
+  const you = myId || socket?.id;
+  const iLose = (loser===you);
+  $("rouletteInfo").textContent = `Round ${round}: ${iLose?"YOU":"OPP"} spins...`;
+  spinDrumTo(selected, bullets, fired);
+}
+
+/* ---------- 공용 UI/버튼 ---------- */
+function startPlayUI(nickYou, nickOpp){
+  $("nameYou").textContent = nickYou || "YOU";
+  $("nameOpp").textContent = nickOpp || "OPP";
+  show("play");
+  ensureDrum();
+}
+
+$("btnSurrender").onclick = ()=>{
+  if(currentRoomId) socket?.emit("leaveRoom", { roomId: currentRoomId });
+  location.reload();
+};
+
+$("btnCopy").onclick = ()=>{
+  const v = $("roomCode").value.trim();
+  if(v) navigator.clipboard.writeText(v);
+};
+
+/* ---------- 매칭 버튼 ---------- */
+const randomAINick = ()=>{
+  const a=["Swift","Silent","Cool","Neon","Crimson","Azure","Lucky","Wild","Ghost","Iron","Rapid","Mellow","Classic","Turbo","Cosmic"];
+  const b=["Raven","Wolf","Tiger","Hawk","Viper","Falcon","Panda","Otter","Lynx","Cobra","Eagle","Shark","Bison","Koala","Gecko"];
+  return `${a[Math.floor(Math.random()*a.length)]}_${b[Math.floor(Math.random()*a.length)]}_${Math.floor(Math.random()*90+10)}`;
+};
+
 $("btnQuick").onclick = async ()=>{
   const nick = getNick();
   const healthy = await serverHealthy().catch(()=>false);
-  if(!healthy){ startLocalAI(nick, randomAINick()); return; }
+
+  if(!healthy){
+    // 오프라인 폴백 모드(선택): 서버 없이 싱글로 시작
+    alert("Server offline. Local mode not supported in full flow build. Please start the server.");
+    return;
+  }
+
   initSocket();
   socket.emit("qm:join", { nick });
   show("connecting");
-  let t=12; $("count").textContent=t;
+
+  let t = 12; $("count").textContent = t;
   matchTimer = setInterval(()=>{
-    t--; $("count").textContent=t;
+    t--; $("count").textContent = t;
     if(t<=0){
-      clearInterval(matchTimer);
+      clearInterval(matchTimer); matchTimer=null;
       socket.emit("qm:leave");
-      startLocalAI(nick, randomAINick());
+      // 폴백 싱글 모드가 필요한 경우 여기에 붙일 수 있음
+      alert("No opponent found. Try Create/Join to play with a friend.");
+      location.reload();
     }
-  },1000);
+  }, 1000);
 };
+
 $("btnCreate").onclick = async ()=>{
   const healthy = await serverHealthy().catch(()=>false);
   if(!healthy){ alert("Server is offline."); refreshServerDot(); return; }
-  initSocket(); socket.emit("room:create", { nick:getNick() });
+  initSocket();
+  socket.emit("room:create", { nick:getNick() });
 };
-$("btnCopy").onclick = ()=>{ const v=$("roomCode").value.trim(); if(v) navigator.clipboard.writeText(v); };
 $("btnJoin").onclick = async ()=>{
   const healthy = await serverHealthy().catch(()=>false);
   if(!healthy){ alert("Server is offline."); refreshServerDot(); return; }
-  const code=$("joinCode").value.trim().toUpperCase(); if(!code) return alert("Enter room code.");
-  initSocket(); socket.emit("room:join", { roomId:code, nick:getNick() });
+  const code = $("joinCode").value.trim().toUpperCase();
+  if(!code) return alert("Enter room code.");
+  initSocket();
+  socket.emit("room:join", { roomId:code, nick:getNick() });
 };
 
-function startLocalAI(nickYou, nickAI){
-  isLocal = true;
-  if(matchTimer){ clearInterval(matchTimer); matchTimer=null; }
-  $("nameYou").textContent = nickYou;
-  $("nameOpp").textContent = nickAI;
-  show("play");
-  LocalGame.start(nickYou, nickAI);
+/* ---------- Service Worker (optional) ---------- */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=> navigator.serviceWorker.register('sw.js').catch(()=>{}));
 }
-
-// SW (optional)
-if('serviceWorker' in navigator){ window.addEventListener('load', ()=> navigator.serviceWorker.register('sw.js').catch(()=>{})); }
 </script>
 </body>
 </html>
