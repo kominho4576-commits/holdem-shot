@@ -1,4 +1,3 @@
-// server.js
 import express from "express";
 import cors from "cors";
 import { createServer } from "http";
@@ -9,10 +8,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(
   cors({
-    origin: [
-      "https://holdemshot.netlify.app",
-      /\.netlify\.app$/,
-    ],
+    origin: ["https://holdemshot.netlify.app", /\.netlify\.app$/],
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
@@ -30,7 +26,7 @@ const io = new Server(httpServer, {
 
 // -------------------- 매칭/룸/게임 상태 --------------------
 const waitingQueue = []; // {id, nick}
-const rooms = new Map(); // roomId -> { players: [id1,id2], nicks: {id:nick}, state: RoomState }
+const rooms = new Map(); // roomId -> { players:[id1,id2], nicks:{id:nick}, state }
 
 function genCode(len = 6) {
   const a = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -54,13 +50,14 @@ function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.rand
 function drawNonJoker(state){
   let c = state.deck.shift();
   while(c && c.joker){
-    // 조커는 공유카드로 안 나가게 덱 뒤로 보내고 다시 셔플
     state.deck.push({joker:true});
     shuffle(state.deck);
     c = state.deck.shift();
   }
   return c;
 }
+
+function randOf(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
 
 function createInitialState(room){
   const deck = shuffle(newDeck());
@@ -70,19 +67,25 @@ function createInitialState(room){
     [p2]: [ deck.shift(), deck.shift() ],
   };
   const community = [{back:true},{back:true},{back:true},{back:true},{back:true}];
-  return {
+  const players = [p1,p2];
+  const S = {
     round: 1,
     deck,
     hands,
     community,
-    phase: "deal", // deal -> flop-exchange -> turn-exchange -> river -> showdown
+    phase: "deal",                 // deal -> flop-exchange -> turn-exchange -> river -> showdown
     phaseLabel: "Dealing",
-    turn: p1,                   // 교환 페이즈에서만 의미
-    allowReady: { [p1]: true, [p2]: true },
-    ready: { [p1]: false, [p2]: false },
-    exchangeLeft: { [p1]: 2, [p2]: 2 }, // 한 라운드 2장 제한(예시)
-    players: [p1, p2],
+    turn: p1,                      // 교환 페이즈에서만 사용
+    players,
+    // ready는 비교환 페이즈에서만 사용
+    ready: Object.fromEntries(players.map(pid=>[pid,false])),
+    allowReady: Object.fromEntries(players.map(pid=>[pid,true])),
+    // 교환(턴 기반)
+    exchangeLeft: Object.fromEntries(players.map(pid=>[pid,2])),
+    acted: Object.fromEntries(players.map(pid=>[pid,false])),   // 이번 교환 페이즈에서 행동했는가
+    canExchange: Object.fromEntries(players.map(pid=>[pid,false])),
   };
+  return S;
 }
 
 function broadcastState(roomId){
@@ -100,8 +103,22 @@ function setPhase(roomId, phase){
   if(phase==="turn-exchange") S.phaseLabel = "Turn (Exchange)";
   if(phase==="river") S.phaseLabel = "River";
   if(phase==="showdown") S.phaseLabel = "Showdown";
-  // Ready 플래그 초기화
-  for(const pid of S.players){ S.ready[pid]=false; S.allowReady[pid]=true; }
+
+  // 공통 초기화
+  for(const pid of S.players){
+    S.ready[pid] = false;
+    S.allowReady[pid] = true;
+  }
+
+  // 교환 페이즈 진입 시: 턴/행동 가능 여부 설정
+  if(phase==="flop-exchange" || phase==="turn-exchange"){
+    for(const pid of S.players){ S.acted[pid] = false; }
+    S.turn = randOf(S.players);                    // 무작위로 턴 부여
+    for(const pid of S.players){ S.canExchange[pid] = (pid === S.turn); }
+  }else{
+    // 교환 외 페이즈에선 교환 금지
+    for(const pid of S.players){ S.canExchange[pid] = false; }
+  }
 }
 
 function progressPhase(roomId){
@@ -110,7 +127,6 @@ function progressPhase(roomId){
 
   switch(S.phase){
     case "deal": {
-      // 공개 3장
       S.community[0] = drawNonJoker(S);
       S.community[1] = drawNonJoker(S);
       S.community[2] = drawNonJoker(S);
@@ -118,13 +134,11 @@ function progressPhase(roomId){
       break;
     }
     case "flop-exchange": {
-      // 공개 4번째
       S.community[3] = drawNonJoker(S);
       setPhase(roomId, "turn-exchange");
       break;
     }
     case "turn-exchange": {
-      // 공개 5번째
       S.community[4] = drawNonJoker(S);
       setPhase(roomId, "river");
       break;
@@ -134,34 +148,30 @@ function progressPhase(roomId){
       break;
     }
     case "showdown": {
-      // 다음 라운드(단순 리셋)
-      const next = createInitialState(room);
-      room.state = next;
+      // 다음 라운드 시작
+      room.state = createInitialState(room);
       break;
     }
   }
   broadcastState(roomId);
 }
 
+// 비교환 페이즈에서만 Ready 동의로 진전
 function maybeAdvanceWhenAllReady(roomId){
   const room = rooms.get(roomId); if(!room) return;
   const S = room.state;
+  if(S.phase==="flop-exchange" || S.phase==="turn-exchange") return;
   const all = S.players.every(pid => S.ready[pid]);
   if(!all) return;
-
-  // 모든 플레이어 준비 -> 다음 단계
   progressPhase(roomId);
 }
 
 function startRoomGame(roomId){
   const room = rooms.get(roomId);
   if(!room || room.players.length<2) return;
-  // 소켓들을 룸에 조인 (퀵매치 대비)
   for(const pid of room.players){
-    const s = io.sockets.sockets.get(pid);
-    if(s) s.join(roomId);
+    io.sockets.sockets.get(pid)?.join(roomId);
   }
-  // 상태 생성 및 브로드캐스트
   room.state = createInitialState(room);
   broadcastState(roomId);
 }
@@ -181,11 +191,9 @@ io.on("connection", (socket) => {
         players: [a.id, b.id],
         nicks: { [a.id]: a.nick, [b.id]: b.nick },
       });
-      // 두 소켓을 룸에 조인시키고 시작
-      const as = io.sockets.sockets.get(a.id);
-      const bs = io.sockets.sockets.get(b.id);
-      as?.join(roomId);
-      bs?.join(roomId);
+
+      io.sockets.sockets.get(a.id)?.join(roomId);
+      io.sockets.sockets.get(b.id)?.join(roomId);
 
       io.to(a.id).emit("qm:found", { roomId, opponentNick: b.nick, youNick: a.nick });
       io.to(b.id).emit("qm:found", { roomId, opponentNick: a.nick, youNick: b.nick });
@@ -225,7 +233,7 @@ io.on("connection", (socket) => {
     startRoomGame(roomId);
   });
 
-  // 유저가 명시적으로 나가기
+  // 명시적 나가기
   socket.on("leaveRoom", ({ roomId })=>{
     const room = rooms.get(roomId);
     if(!room) return;
@@ -237,43 +245,55 @@ io.on("connection", (socket) => {
     else io.to(left).emit("room:peer-left");
   });
 
-  // 플레이어 준비(=페이즈 진행 동의)
+  // 비교환 페이즈에서 Ready (양측 합의)
   socket.on("player:ready", ({ roomId })=>{
     const room = rooms.get(roomId); if(!room || !room.state) return;
     const S = room.state;
+    if(S.phase==="flop-exchange" || S.phase==="turn-exchange") return; // 교환 페이즈에선 무시 (턴 기반)
     if(!(socket.id in S.ready)) return;
     if(!S.allowReady[socket.id]) return;
-
     S.ready[socket.id] = true;
     broadcastState(roomId);
     maybeAdvanceWhenAllReady(roomId);
   });
 
-  // 교환 요청 (교환 허용 단계에서만)
+  // 교환 요청 (턴 플레이어만, 0~2장)
   socket.on("exchange:request", ({ roomId, indices })=>{
     const room = rooms.get(roomId); if(!room || !room.state) return;
     const S = room.state;
     const pid = socket.id;
     if(!S.players.includes(pid)) return;
+    const exchangePhase = (S.phase==="flop-exchange" || S.phase==="turn-exchange");
+    if(!exchangePhase) return;
 
-    const canExchange = (S.phase==="flop-exchange" || S.phase==="turn-exchange");
-    if(!canExchange) return;
+    // 턴이 아니면 거부
+    if(S.turn !== pid || S.acted[pid]) return;
 
     const hand = S.hands[pid] || [];
-    const allowed = S.exchangeLeft[pid] || 0;
-    if(!Array.isArray(indices)) return;
+    const allowed = Math.max(0, Math.min(2, S.exchangeLeft[pid] || 0));
+    const arr = Array.isArray(indices) ? indices : [];
+    const unique = Array.from(new Set(arr.map(i=>Number(i)))).filter(i=> i>=0 && i<hand.length);
+    const take = unique.slice(0, allowed);
 
-    // 최대 교환 가능 수 검증
-    const unique = Array.from(new Set(indices.map(i=>Number(i)))).filter(i=> i>=0 && i<hand.length);
-    const take = unique.slice(0, Math.max(0, Math.min(allowed, 2)));
-
-    // 교환(플레이어 패는 조커 허용)
     for(const idx of take){
-      hand[idx] = S.deck.shift();
+      hand[idx] = S.deck.shift(); // 플레이어 패에는 조커 허용
     }
-    S.exchangeLeft[pid] = Math.max(0, allowed - take.length);
+    S.exchangeLeft[pid] = Math.max(0, (S.exchangeLeft[pid]||0) - take.length);
 
-    broadcastState(roomId);
+    // 이 플레이어는 이번 페이즈 행동 완료
+    S.acted[pid] = true;
+
+    // 턴 전환 or 다음 페이즈
+    const other = S.players.find(x=>x!==pid);
+    if(S.acted[other]){
+      // 두 명 모두 행동 완료 → 다음 페이즈
+      progressPhase(roomId);
+      return;
+    }else{
+      S.turn = other;
+      for(const p of S.players){ S.canExchange[p] = (p===S.turn); }
+      broadcastState(roomId);
+    }
   });
 
   socket.on("disconnect", () => {
