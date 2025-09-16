@@ -1,15 +1,17 @@
-// server.js (CORS 부분 교체)
+// server.js
 import express from "express";
 import cors from "cors";
 import { createServer } from "http";
 import { Server } from "socket.io";
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
+/** CORS: Netlify/Vercel/Pages/Local 허용 */
 const ORIGINS = [
   "https://holdemshot.netlify.app",
   /.*\.netlify\.app$/,
-  "https://holdemshot.vercel.app",
+  "https://holdem-shot.vercel.app",
   /.*\.vercel\.app$/,
   "https://holdemshot.pages.dev",
   /.*\.pages\.dev$/,
@@ -18,17 +20,20 @@ const ORIGINS = [
   "http://localhost:8080",
 ];
 
-app.use(cors({
-  origin: ORIGINS,
-  methods: ["GET","POST","OPTIONS"],
-  allowedHeaders: ["Content-Type","Authorization"],
-}));
+app.use(
+  cors({
+    origin: ORIGINS,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+app.get("/health", (_req, res) => res.status(200).send("OK"));
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: { origin: ORIGINS, methods: ["GET","POST"] },
+  cors: { origin: ORIGINS, methods: ["GET", "POST"] },
 });
-
 
 /* -------------------- 매칭/룸 -------------------- */
 const waitingQueue = []; // {id, nick}
@@ -129,7 +134,6 @@ function eval5(cards) {
   }
   return {score:[1,...ranks], name:"High Card"};
 }
-
 function bestHand7(cards7) {
   const base = cards7.filter(c=>!c.joker);
   const jokers = cards7.length - base.length;
@@ -191,7 +195,7 @@ function createStateForRound(room, roundNo){
     turn: p1,
     acted: Object.fromEntries(players.map(pid=>[pid,false])),
     canExchange: Object.fromEntries(players.map(pid=>[pid,false])),
-    phaseExchangeLeft: Object.fromEntries(players.map(pid=>[pid,2])), // 페이즈 시작마다 2장
+    phaseExchangeLeft: Object.fromEntries(players.map(pid=>[pid,2])),
     ready: Object.fromEntries(players.map(pid=>[pid,false])),
     allowReady: Object.fromEntries(players.map(pid=>[pid,true])),
   };
@@ -212,13 +216,12 @@ function setPhase(roomId, phase){
   if(phase==="river-exchange")  S.phaseLabel="River (Final Exchange)";
   if(phase==="showdown")        S.phaseLabel="Showdown";
 
-  // Ready 리셋
   for(const pid of S.players){ S.ready[pid]=false; S.allowReady[pid]=true; }
 
   const isEx = ["flop-exchange","turn-exchange","river-exchange"].includes(phase);
   if(isEx){
     for(const pid of S.players){ S.acted[pid]=false; S.phaseExchangeLeft[pid]=2; }
-    S.turn = randOf(S.players);
+    S.turn = S.players[Math.floor(Math.random()*S.players.length)];
     for(const pid of S.players) S.canExchange[pid] = (pid===S.turn);
   }else{
     for(const pid of S.players) S.canExchange[pid] = false;
@@ -250,9 +253,7 @@ function progressPhase(roomId){
       setPhase(roomId,"showdown");
       break;
     }
-    case "showdown": {
-      break;
-    }
+    case "showdown": { break; }
   }
   broadcastState(roomId);
 }
@@ -263,7 +264,7 @@ function startRoomGame(roomId){
   for(const pid of room.players){ io.sockets.sockets.get(pid)?.join(roomId); }
   room.state = createStateForRound(room, 1);
   broadcastState(roomId);
-  setTimeout(()=>progressPhase(roomId), 600); // Dealing 살짝 보여주기
+  setTimeout(()=>progressPhase(roomId), 600);
 }
 
 /* -------------------- 쇼다운/룰렛 -------------------- */
@@ -296,10 +297,8 @@ function showdownAndRoulette(roomId){
     eval: { a: Ea, b: Eb }
   });
 
-  if(tie){
-    setTimeout(()=>nextRound(roomId), 2000);
-    return;
-  }
+  if(tie){ setTimeout(()=>nextRound(roomId), 2000); return; }
+
   const HOLES = 6;
   const bulletsCount = Math.min(6, S.round);
   const allIdx = [0,1,2,3,4,5];
@@ -308,17 +307,9 @@ function showdownAndRoulette(roomId){
   const selected = Math.floor(Math.random()*HOLES);
   const fired = bullets.includes(selected);
 
-  io.to(roomId).emit("roulette:spin", {
-    roomId, round:S.round,
-    loser,
-    holes: HOLES,
-    bullets,
-    selected, fired
-  });
-
+  io.to(roomId).emit("roulette:spin", { roomId, round:S.round, loser, holes: HOLES, bullets, selected, fired });
   setTimeout(()=>nextRound(roomId), 3000);
 }
-
 function nextRound(roomId){
   const room = rooms.get(roomId); if(!room) return;
   const cur = room.state?.round || 1;
@@ -374,7 +365,6 @@ io.on("connection", (socket) => {
     startRoomGame(roomId);
   });
 
-  // 명시적 나가기
   socket.on("leaveRoom", ({ roomId })=>{
     const room = rooms.get(roomId); if(!room) return;
     room.players = room.players.filter(id=>id!==socket.id);
@@ -385,7 +375,7 @@ io.on("connection", (socket) => {
     else io.to(left).emit("room:peer-left");
   });
 
-  // Ready: 페이즈와 무관하게 카운터만 갱신(자동 진행은 교환 로직이 담당)
+  // Ready 카운터(정보용)
   socket.on("player:ready", ({ roomId })=>{
     const room = rooms.get(roomId); if(!room || !room.state) return;
     const S = room.state;
@@ -396,7 +386,7 @@ io.on("connection", (socket) => {
     broadcastState(roomId);
   });
 
-  // 교환 요청(턴 기반, 페이즈당 1회, 최대 2장)
+  // 교환(턴 기반, 페이즈당 1회, 최대 2장)
   socket.on("exchange:request", ({ roomId, indices })=>{
     const room = rooms.get(roomId); if(!room || !room.state) return;
     const S = room.state;
