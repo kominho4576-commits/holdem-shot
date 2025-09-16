@@ -59,16 +59,14 @@ const randOf = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const uniqKey = (c)=> c.joker ? "J" : `${c.rank}${c.suit}`;
 
 /* -------------------- 족보 평가(조커 와일드) -------------------- */
-/** 5장 핸드 평가 → 점수 배열(사전식 비교용) + 이름 */
 function eval5(cards) {
   const ranks = cards.map(c=>RANK_VAL[c.rank]).sort((a,b)=>b-a);
   const suits = cards.map(c=>c.suit);
   const bySuit = new Map(); suits.forEach((s,i)=>{ if(!bySuit.has(s)) bySuit.set(s,[]); bySuit.get(s).push(ranks[i]); });
   const counts = new Map(); ranks.forEach(v=>counts.set(v,(counts.get(v)||0)+1));
-  const groups = [...counts.entries()].sort((a,b)=> b[1]-a[1] || b[0]-a[0]); // [rank,count] desc
+  const groups = [...counts.entries()].sort((a,b)=> b[1]-a[1] || b[0]-a[0]);
 
   const isFlush = [...bySuit.values()].some(arr=>arr.length===5);
-  // Straight (A-5 처리)
   const rset = [...new Set(ranks)];
   let isStraight=false, straightHigh=0;
   for(let i=0;i<=rset.length-1;i++){
@@ -79,10 +77,8 @@ function eval5(cards) {
     }
     if(seq.length>=5){ isStraight=true; straightHigh=seq[0]; break; }
   }
-  // wheel A-5
   if(!isStraight && rset.includes(14) && [2,3,4,5].every(v=>rset.includes(v))){ isStraight=true; straightHigh=5; }
 
-  // Straight Flush
   if(isFlush){
     for(const [s, arr] of bySuit.entries()){
       const u = [...new Set(arr)].sort((a,b)=>b-a);
@@ -99,77 +95,61 @@ function eval5(cards) {
     }
   }
 
-  // Four of a Kind
   if(groups[0][1]===4){
     const four=groups[0][0], kicker=groups.find(g=>g[0]!==four)[0];
     return {score:[8,four,kicker], name:"Four of a Kind"};
   }
-  // Full House
   if(groups[0][1]===3 && (groups[1]?.[1]||0)>=2){
     return {score:[7,groups[0][0],groups[1][0]], name:"Full House"};
   }
-  // Flush
   if(isFlush){
     const arr = [...bySuit.values()].find(a=>a.length===5).sort((a,b)=>b-a);
     return {score:[6,...arr], name:"Flush"};
   }
-  // Straight
   if(isStraight) return {score:[5,straightHigh], name:"Straight"};
-  // Three
   if(groups[0][1]===3){
     const kick = ranks.filter(v=>v!==groups[0][0]).slice(0,2);
     return {score:[4,groups[0][0],...kick], name:"Three of a Kind"};
   }
-  // Two Pair
   if(groups[0][1]===2 && groups[1]?.[1]===2){
     const pair1=groups[0][0], pair2=groups[1][0];
     const kick = ranks.filter(v=>v!==pair1 && v!==pair2)[0];
     const hi=Math.max(pair1,pair2), lo=Math.min(pair1,pair2);
     return {score:[3,hi,lo,kick], name:"Two Pair"};
   }
-  // One Pair
   if(groups[0][1]===2){
     const pair=groups[0][0];
     const kick = ranks.filter(v=>v!==pair).slice(0,3);
     return {score:[2,pair,...kick], name:"One Pair"};
   }
-  // High Card
   return {score:[1,...ranks], name:"High Card"};
 }
 
-/** 7장(+조커 0~2)에서 최적 5장 평가 */
 function bestHand7(cards7) {
   const base = cards7.filter(c=>!c.joker);
   const jokers = cards7.length - base.length;
 
-  // 후보 대체 카드(중복/이미 있는 카드 제외)
   const all = [];
   for(const s of SUITS) for(const r of RANKS) all.push({rank:r,suit:s});
   const used = new Set(base.map(uniqKey));
   const pool = all.filter(c=>!used.has(uniqKey(c)));
 
   function bestOf(arr7){
-    // 7장 중 5장 조합 21개 평가
-    const idx = [0,1,2,3,4,5,6];
     let best=null;
     for(let a=0;a<7;a++) for(let b=a+1;b<7;b++){
-      const pick=[];
-      for(let i=0;i<7;i++) if(i!==a && i!==b) pick.push(arr7[i]);
+      const pick=[]; for(let i=0;i<7;i++) if(i!==a && i!==b) pick.push(arr7[i]);
       const e = eval5(pick);
       if(!best || compareScore(e.score,best.score)>0) best=e;
     }
     return best;
   }
-  function compareScore(a,b){ // lexicographic
+  function compareScore(a,b){
     const n=Math.max(a.length,b.length);
     for(let i=0;i<n;i++){ const ai=a[i]||0, bi=b[i]||0; if(ai!==bi) return ai-bi; }
     return 0;
   }
 
-  if(jokers===0){
-    const best = bestOf(base);
-    return {...best};
-  }
+  if(jokers===0) return bestOf(base);
   if(jokers===1){
     let best=null;
     for(const sub of pool){
@@ -178,7 +158,6 @@ function bestHand7(cards7) {
     }
     return best;
   }
-  // jokers===2
   let best=null;
   for(let i=0;i<pool.length;i++){
     for(let j=i+1;j<pool.length;j++){
@@ -231,7 +210,6 @@ function setPhase(roomId, phase){
   // Ready 리셋
   for(const pid of S.players){ S.ready[pid]=false; S.allowReady[pid]=true; }
 
-  // 교환 페이즈 세팅
   const isEx = ["flop-exchange","turn-exchange","river-exchange"].includes(phase);
   if(isEx){
     for(const pid of S.players){ S.acted[pid]=false; S.phaseExchangeLeft[pid]=2; }
@@ -268,7 +246,6 @@ function progressPhase(roomId){
       break;
     }
     case "showdown": {
-      // 다음 라운드는 별도 트리거에서
       break;
     }
   }
@@ -281,7 +258,7 @@ function startRoomGame(roomId){
   for(const pid of room.players){ io.sockets.sockets.get(pid)?.join(roomId); }
   room.state = createStateForRound(room, 1);
   broadcastState(roomId);
-  setTimeout(()=>progressPhase(roomId), 600); // Dealing 잠깐 보여주고 플롭 공개
+  setTimeout(()=>progressPhase(roomId), 600); // Dealing 살짝 보여주기
 }
 
 /* -------------------- 쇼다운/룰렛 -------------------- */
@@ -295,16 +272,15 @@ function showdownAndRoulette(roomId){
   const Ea = bestHand7(a7);
   const Eb = bestHand7(b7);
 
-  // 비교
   function cmp(x,y){
     const n=Math.max(x.score.length,y.score.length);
     for(let i=0;i<n;i++){ const xi=x.score[i]||0, yi=y.score[i]||0; if(xi!==yi) return xi-yi; }
     return 0;
   }
   const diff = cmp(Ea,Eb);
-  let winner=null, loser=null, winEval=null, loseEval=null, tie=false;
-  if(diff>0){ winner=a; loser=b; winEval=Ea; loseEval=Eb; }
-  else if(diff<0){ winner=b; loser=a; winEval=Eb; loseEval=Ea; }
+  let winner=null, loser=null, tie=false;
+  if(diff>0){ winner=a; loser=b; }
+  else if(diff<0){ winner=b; loser=a; }
   else { tie=true; }
 
   io.to(roomId).emit("round:result", {
@@ -316,11 +292,9 @@ function showdownAndRoulette(roomId){
   });
 
   if(tie){
-    // 2초 후 다음 라운드
     setTimeout(()=>nextRound(roomId), 2000);
     return;
   }
-  // 러시안 룰렛: 구멍 6, 총알 수 = round(최대 6)
   const HOLES = 6;
   const bulletsCount = Math.min(6, S.round);
   const allIdx = [0,1,2,3,4,5];
@@ -333,11 +307,10 @@ function showdownAndRoulette(roomId){
     roomId, round:S.round,
     loser,
     holes: HOLES,
-    bullets, // ex) [1,3]
+    bullets,
     selected, fired
   });
 
-  // 3초 후 다음 라운드 시작
   setTimeout(()=>nextRound(roomId), 3000);
 }
 
@@ -407,8 +380,16 @@ io.on("connection", (socket) => {
     else io.to(left).emit("room:peer-left");
   });
 
-  // 비교환 페이즈에서 Ready는 사용 안 함(자동 진행). 남겨두되 무시.
-  socket.on("player:ready", (_)=>{});
+  // Ready: 페이즈와 무관하게 카운터만 갱신(자동 진행은 교환 로직이 담당)
+  socket.on("player:ready", ({ roomId })=>{
+    const room = rooms.get(roomId); if(!room || !room.state) return;
+    const S = room.state;
+    if(!S.players.includes(socket.id)) return;
+    if(!(socket.id in S.ready)) return;
+    if(S.ready[socket.id]) return;
+    S.ready[socket.id] = true;
+    broadcastState(roomId);
+  });
 
   // 교환 요청(턴 기반, 페이즈당 1회, 최대 2장)
   socket.on("exchange:request", ({ roomId, indices })=>{
@@ -426,23 +407,18 @@ io.on("connection", (socket) => {
     const unique = Array.from(new Set(arr.map(n=>Number(n)))).filter(i=> i>=0 && i<hand.length);
     const take = unique.slice(0, allowed);
 
-    // 교환 실행(플레이어 패에 조커 허용)
     for(const idx of take){ hand[idx] = S.deck.shift(); }
     S.phaseExchangeLeft[pid] = Math.max(0, (S.phaseExchangeLeft[pid]||0) - take.length);
 
-    // 이번 페이즈 행동 완료
     S.acted[pid] = true;
 
     const other = S.players.find(x=>x!==pid);
     if(S.acted[other]){
-      // 두 명 모두 완료 → 다음 페이즈 또는 쇼다운/룰렛
       progressPhase(roomId);
       if(S.phase==="showdown"){
-        // 쇼다운 즉시 평가 & 룰렛
-        setTimeout(()=>showdownAndRoulette(roomId), 150); // 살짝 지연으로 UI 갱신 여유
+        setTimeout(()=>showdownAndRoulette(roomId), 150);
       }
     }else{
-      // 턴 넘기기
       S.turn = other;
       for(const p of S.players) S.canExchange[p] = (p===S.turn);
       broadcastState(roomId);
