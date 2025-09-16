@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect x="96" y="32" rx="24" ry="24" width="320" height="448" fill="#ffffff" stroke="#6f66d5" stroke-width="16"/>
+  <rect x="120" y="56" rx="16" ry="16" width="272" height="400" fill="none" stroke="#6f66d5" stroke-width="8"/>
+  <!-- JOKER -->
+  <text x="136" y="112" font-family="monospace" font-size="36" fill="#6f66d5">JOKER</text>
+  <!-- bullet hole -->
+  <circle cx="304" cy="200" r="26" fill="#6f66d5"/>
+  <circle cx="304" cy="200" r="12" fill="#ffffff"/>
+  <path d="M280 172 l-10 -18 M328 172 l10 -18 M280 228 l-10 18 M328 228 l10 18" stroke="#6f66d5" stroke-width="6"/>
+</svg>
