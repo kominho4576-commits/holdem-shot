@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#7c6cf4">
+<title>Hold’em&SHOT.io</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<style>
+:root{ --ink:#7c6cf4; --line:#c7c1ff; --soft:#e7e3ff; }
+*{box-sizing:border-box} html,body{height:100%;margin:0;background:#fff;color:var(--ink);font-family:system-ui,-apple-system,"Apple SD Gothic Neo",Segoe UI,Roboto,Helvetica,Arial,"Noto Sans KR",sans-serif}
+button{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6rem 1rem; border-radius:18px; font-weight:900; cursor:pointer; box-shadow:0 0 0 3px var(--soft) inset}
+button:disabled{opacity:.5;cursor:not-allowed}
+input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6rem 1rem; border-radius:18px; font-weight:800; width:100%; box-shadow:0 0 0 3px var(--soft) inset}
+.title{font-size:clamp(28px,6vw,64px);font-weight:900;text-align:center;margin:40px 0}
+.container{max-width:1100px;margin:0 auto;padding:0 16px 40px}
+.sketch{border:4px solid var(--line);border-radius:18px;box-shadow:0 0 0 3px var(--soft) inset;padding:1rem;max-width:760px;margin:0 auto;}
+.row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}
+.status{display:flex;align-items:center;gap:8px;margin-top:12px}
+.statusWrap{max-width:760px;margin:8px auto 0;padding:0 2px}
+.dot{width:12px;height:12px;border-radius:50%;background:#e44}
+.dot.on{background:#2ecc71}
+.retry{font-size:.9rem;text-decoration:underline;cursor:pointer}
+.center{display:flex;justify-content:center;align-items:center}
+.screen{display:none} .screen.active{display:block}
+
+/* CONNECTING */
+.spinner{animation:spin 1s linear infinite;border:6px solid #e5e1ff;border-top-color:#7c6cf4;border-radius:50%;width:64px;height:64px}
+@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+
+/* PLAY SCREEN */
+.wrap{height:100vh;display:grid;grid-template-columns:1fr 2px 0.78fr;gap:0}
+.board,.roulette{ border:4px solid var(--line); border-radius:20px;position:relative}
+.divider{background:var(--line)}
+.phase{position:absolute; top:20px; left:20px; font-size:32px; font-weight:900;}
+.p2{position:absolute; top:24px; right:24px; display:flex; align-items:center; gap:12px; font-size:40px; font-weight:900; z-index:3;}
+.p1{position:absolute; left:20px; bottom:28px; display:flex; align-items:center; gap:12px; font-size:48px; font-weight:900;}
+.light{width:16px;height:16px;border-radius:50%; border:3px solid var(--ink); background:#fff; display:inline-block;}
+.light.on{ background:#43d17a; border-color:#43d17a }
+
+/* hands & shared */
+.handTop{position:absolute; left:50%; transform:translateX(-50%); top:92px; display:flex; gap:24px; z-index:2;}
+.shared{position:absolute; left:80px; right:80px; top:340px; display:grid; grid-template-columns:repeat(5,140px); gap:24px; justify-content:center; justify-items:center; align-items:center; z-index:1;}
+.card{width:140px; aspect-ratio:2.5/3.5; border:5px solid var(--line); border-radius:14px; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:44px; color:var(--ink); background:#fff; position:relative; overflow:hidden; box-shadow:0 0 0 3px var(--soft) inset; user-select:none; transition:.1s; text-align:center}
+.card .big{font-size:44px; line-height:1; }
+.card .small{font-size:18px; opacity:.8; margin-top:6px}
+/* JOKER label smaller */
+.card .big.jokerLabel{ font-size:30px; letter-spacing:1px; }
+.card .tagJoker{ font-size:16px; opacity:.75; margin-top:6px }
+
+.back::before{content:""; position:absolute; inset:0; background:repeating-linear-gradient(45deg, rgba(124,108,244,.45) 0 10px, rgba(124,108,244,.15) 10px 20px); opacity:.85;}
+.face{background:linear-gradient(180deg,#fff 70%, rgba(124,108,244,.08));}
+.handBottom{position:absolute; left:160px; bottom:110px; display:flex; gap:28px; align-items:center;}
+
+.resultLine{position:absolute; left:160px; right:160px; top:540px; text-align:center; font-weight:900; opacity:.95}
+
+.btns{position:absolute; right:160px; bottom:40px; display:flex; gap:12px; align-items:center; font-weight:800; z-index:5;}
+
+.rwrap{height:100%; display:grid; place-items:center}
+.drum{position:relative; width:min(420px,72vh); aspect-ratio:1/1; border:5px solid var(--line); border-radius:50%; box-shadow:0 0 0 3px var(--soft) inset; display:grid; place-items:center; overflow:visible; transition: transform 2.2s cubic-bezier(.22,.8,.25,1);}
+.centerDot{width:18px; height:18px; border-radius:50%; background:#7c6cf4; opacity:.6}
+.hole{position:absolute; width:84px; height:84px; border-radius:50%; border:5px solid var(--line); background:#fff; display:grid; place-items:center; box-shadow:0 0 0 3px var(--soft) inset;}
+.hole .bullet{width:46px; height:46px; border-radius:50%; background:#5b5b5b; box-shadow:inset 0 0 0 10px #2b2b2b;}
+.hole.selected{outline:4px solid var(--ink); outline-offset:3px; animation:pulse 600ms ease-in-out 1;}
+@keyframes pulse{0%{transform:scale(1)}60%{transform:scale(1.07)}100%{transform:scale(1)}}
+
+.arrow{position:absolute; top:-22px; left:50%; transform:translateX(-50%); width:0;height:0;border-left:18px solid transparent;border-right:18px solid transparent;border-top:24px solid var(--ink);}
+.infoLine{margin-top:8px;opacity:.85; text-align:center}
+
+/* result colors */
+.safeText{ color:#2ecc71; font-weight:900 }
+.bangText{ color:#e74c3c; font-weight:900 }
+
+.activePanel{outline:4px solid var(--ink); outline-offset:-4px}
+.card.selected{outline:4px solid var(--ink); box-shadow:0 0 0 3px var(--ink) inset}
+.card.selected-opp{outline:4px dashed var(--ink);}
+
+#rotate{position:fixed; inset:0; background:#fff; color:#7c6cf4; display:none; align-items:center; justify-content:center; text-align:center; padding:24px; z-index:1000;}
+#flash{position:fixed; pointer-events:none; inset:0; background:rgba(255,0,0,0.25); opacity:0; z-index:999; }
+@keyframes flash1 { 0%{opacity:0} 15%{opacity:1} 100%{opacity:0} }
+.flashOnce{ animation: flash1 200ms ease-out 1; }
+
+.roulette.active{ box-shadow:0 0 0 4px var(--line) inset, 0 0 18px rgba(120,90,255,.4);}
+
+@media (max-width:1200px){ .handBottom{left:120px} .shared{left:60px; right:60px; top:320px} .resultLine{top:520px} }
+@media (max-width:1000px){ .handBottom{left:90px} .shared{left:40px; right:40px; top:300px} .resultLine{top:500px} }
+</style>
+</head>
+<body>
+<div id="rotate"><div class="box"><h2>Rotate to Landscape</h2><p>Mobile supports landscape only. Please rotate your device.</p></div></div>
+<div id="flash"></div>
+
+<div id="screen-home" class="screen active" aria-hidden="false">
+  <div class="title">Hold’em&SHOT.io</div>
+  <div class="container">
+    <div class="sketch">
+      <div class="row">
+        <input id="nickname" placeholder="Nickname" />
+        <button id="btnQuick">Quick Match</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="btnCreate">Create Room</button>
+        <input id="roomCode" placeholder="Room Code" />
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input id="joinCode" placeholder="Enter Code to Join" />
+        <button id="btnJoin">Join Room</button>
+      </div>
+    </div>
+    <div class="statusWrap">
+      <div class="status"><div id="srvDot" class="dot"></div><div>Server</div>
+        <div class="retry" id="retry">↻ Retry</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="screen-connecting" class="screen" aria-hidden="true">
+  <div class="title">Hold’em&SHOT.io</div>
+  <div class="container">
+    <div class="sketch center" style="min-height:320px;flex-direction:column;gap:18px">
+      <div class="spinner"></div>
+      <div id="connectingText" style="font-size:44px;font-weight:900">Connecting... <span id="count">8</span>s</div>
+    </div>
+  </div>
+</div>
+
+<div id="screen-play" class="screen" aria-hidden="true">
+  <div class="wrap">
+    <section class="board activePanel" id="board">
+      <div class="phase">Phase: <span id="phaseText">Dealing</span> <span id="roundText" style="font-size:18px;opacity:.85">(Round 1)</span></div>
+      <div class="p2"><span class="light" id="p2Light"></span> <span id="nameOpp">PLAYER2</span></div>
+
+      <div class="handTop" id="oppHand"></div>
+      <div class="shared" id="shared">
+        <div class="card back"></div><div class="card back"></div><div class="card back"></div><div class="card back"></div><div class="card back"></div>
+      </div>
+      <div class="resultLine" id="resultLine"></div>
+      <div class="handBottom" id="hand"></div>
+
+      <div class="btns">
+        <button id="btnReady" disabled>Ready</button>
+        <button id="btnSurrender">Surrender</button>
+      </div>
+
+      <div class="p1"><span id="nameYou">PLAYER1</span> <span class="light on" id="p1Light"></span></div>
+    </section>
+
+    <div class="divider"></div>
+
+    <section class="roulette" id="roulette">
+      <div class="rwrap">
+        <div style="position:relative">
+          <div class="arrow"></div>
+          <div class="drum" id="drum">
+            <div class="centerDot"></div>
+          </div>
+        </div>
+        <div class="infoLine" id="rouletteInfo">Loser spins Russian Roulette (round = bullets)</div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div id="screen-victory" class="screen" aria-hidden="true">
+  <div class="title">Victory</div>
+  <div class="center small" id="vicBack" style="margin-bottom:12px">Back to Home in 5s…</div>
+  <div class="container"><div class="sketch center" style="min-height:260px"><div>
+    <div style="font-size:36px;font-weight:900">Winner: <span id="winName">PLAYER</span></div>
+    <div style="font-size:36px;font-weight:900;margin-top:8px">Loser: <span id="loseName">AI</span></div>
+  </div></div></div>
+</div>
+
+<div id="screen-defeat" class="screen" aria-hidden="true">
+  <div class="title">Defeat</div>
+  <div class="center small" id="defBack" style="margin-bottom:12px">Back to Home in 5s…</div>
+  <div class="container"><div class="sketch center" style="min-height:260px"><div>
+    <div style="font-size:36px;font-weight:900">Winner: <span id="dwinName">AI</span></div>
+    <div style="font-size:36px;font-weight:900;margin-top:8px">Loser: <span id="dloseName">PLAYER</span></div>
+  </div></div></div>
+</div>
+
+<script>
+// ===== Utilities =====
+const $=id=>document.getElementById(id);
+const screens=["home","connecting","play","victory","defeat"];
+function show(n){
+  screens.forEach(s=>{
+    const el = $("screen-"+s);
+    el.classList.toggle("active", s===n);
+    el.setAttribute('aria-hidden', s===n? 'false':'true');
+  });
+}
+
+function isMobile(){ return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent); }
+function setRotate(){ $("rotate").style.display = (isMobile() && window.innerHeight>window.innerWidth)? "flex":"none"; }
+addEventListener("resize", setRotate); setRotate();
+document.addEventListener("click", async ()=>{ if(isMobile() && screen.orientation && screen.orientation.lock){ try{ await screen.orientation.lock("landscape"); }catch(e){} } }, {once:true});
+
+// PWA SW
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  });
+}
+
+// Buttons (no overlays block)
+["btnQuick","btnCreate","btnJoin"].forEach(id=>$(id).addEventListener('click',()=>{
+  startConnectingThenAI(getNick());
+}));
+$("retry").onclick=()=>fetch('/health').then(r=>r.ok?$("srvDot").classList.add('on'):null).catch(()=>{});
+function getNick(){ return ($("nickname").value.trim()||"PLAYER"); }
+
+// ===== Cards / Poker helpers =====
+const SUITS=["♠","♥","♦","♣"], RANKS=["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+const deal=(d,n)=>d.splice(0,n);
+const deckNew=_=>{const d=[]; for(const s of SUITS){ for(const r of RANKS){ d.push({rank:r,suit:s}); } } d.push({joker:true}); d.push({joker:true}); return d;};
+
+// ***** New: 7 -> best 5 evaluation with wrap straight *****
+const RANK_ORDER = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
+const RANK_TO_I = Object.fromEntries(RANK_ORDER.map((r,i)=>[r,i]));
+
+function isFlush5(cards){
+  const s = cards.map(c=>c.suit);
+  return s.every(x=>x===s[0]);
+}
+function isFour(cards){
+  const cnt={}; cards.forEach(c=>cnt[c.rank]=(cnt[c.rank]||0)+1);
+  return Object.values(cnt).includes(4);
+}
+function isFullHouse(cards){
+  const cnt={}; cards.forEach(c=>cnt[c.rank]=(cnt[c.rank]||0)+1);
+  const vals=Object.values(cnt).sort((a,b)=>b-a);
+  return vals[0]===3 && vals[1]===2;
+}
+function isThree(cards){
+  const cnt={}; cards.forEach(c=>cnt[c.rank]=(cnt[c.rank]||0)+1);
+  return Object.values(cnt).includes(3);
+}
+function pairCounts(cards){
+  const cnt={}; cards.forEach(c=>cnt[c.rank]=(cnt[c.rank]||0)+1);
+  const pairs = Object.values(cnt).filter(v=>v===2).length;
+  return pairs;
+}
+function isStraight5(cards){
+  const uniq=[...new Set(cards.map(c=>RANK_TO_I[c.rank]))];
+  if(uniq.length<5) return false;
+  uniq.sort((a,b)=>a-b);
+  for(let start=0; start<13; start++){
+    let ok=true;
+    for(let k=0;k<5;k++){
+      const val=(start+k)%13;
+      if(!uniq.includes(val)){ ok=false; break; }
+    }
+    if(ok) return true;
+  }
+  return false;
+}
+function scoreName5(cards){
+  const flush=isFlush5(cards);
+  const straight=isStraight5(cards);
+  if(flush && straight) return {score:8, name:"Straight Flush"};
+  if(isFour(cards)) return {score:7, name:"Four of a Kind"};
+  if(isFullHouse(cards)) return {score:6, name:"Full House"};
+  if(flush) return {score:5, name:"Flush"};
+  if(straight) return {score:4, name:"Straight"};
+  if(isThree(cards)) return {score:3, name:"Three of a Kind"};
+  const pc=pairCounts(cards);
+  if(pc>=2) return {score:2, name:"Two Pair"};
+  if(pc===1) return {score:1, name:"One Pair"};
+  return {score:0, name:"High Card"};
+}
+function allComb5(arr){
+  const res=[]; const n=arr.length;
+  for(let a=0;a<n-4;a++)for(let b=a+1;b<n-3;b++)for(let c=b+1;c<n-2;c++)for(let d=c+1;d<n-1;d++)for(let e=d+1;e<n;e++){
+    res.push([arr[a],arr[b],arr[c],arr[d],arr[e]]);
+  }
+  return res;
+}
+function bestFrom7(seven){
+  const combs=allComb5(seven);
+  let best=null;
+  for(const c5 of combs){
+    const sn=scoreName5(c5);
+    if(!best || sn.score>best.score) best={score:sn.score,name:sn.name,cards:c5};
+  }
+  return best;
+}
+function bestHand(cards){
+  const fixed = cards.map(c => c.joker && c.trRank ? {rank:c.trRank,suit:c.trSuit} : c).filter(c=>!c.joker);
+  return bestFrom7(fixed);
+}
+
+function monteCarloExpected(hand, sharedKnown, deck, replaceIdxSet, sims=120){
+  let sum=0;
+  for(let s=0;s<sims;s++){
+    const copyDeck=deck.slice();
+    const h=hand.map((c,i)=> replaceIdxSet.has(i)? copyDeck.shift(): c);
+    sum += bestHand(h.concat(sharedKnown)).score;
+  }
+  return sum/sims;
+}
+function aiChooseExchange(hand, sharedKnown, deck){
+  const cand=[[],[0],[1],[0,1]];
+  let best=-1, bestSet=[];
+  for(const c of cand){
+    const exp = monteCarloExpected(hand, sharedKnown, deck, new Set(c), 120);
+    if(exp>best){ best=exp; bestSet=c; }
+  }
+  return bestSet;
+}
+
+// ===== Game engine =====
+const Game=(()=>{
+  let timers=[], resizeObs=null, creatingHoles=false;
+  const S={ you:{name:"PLAYER",hand:[],alive:true}, opp:{name:"AI",hand:[],alive:true}, shared:[], deck:[], round:1, phase:"Dealing", turn:"you",
+    loserNeedsRoulette:false, loserHadJoker:false, winnerHadJoker:false,
+    exchangeStep:0, exchangeFirst:'you' };
+
+  function randomAINick(){ const adj=["Swift","Silent","Cool","Neon","Crimson","Azure","Lucky","Wild","Ghost","Iron","Rapid","Mellow","Classic","Turbo","Cosmic"]; const animal=["Raven","Wolf","Tiger","Hawk","Viper","Falcon","Panda","Otter","Lynx","Cobra","Eagle","Shark","Bison","Koala","Gecko"]; return adj[Math.floor(Math.random()*adj.length)] + "_" + animal[Math.floor(Math.random()*adj.length)] + "_" + Math.floor(Math.random()*90+10); }
+  function updateNames(){ $("nameYou").textContent=S.you.name; $("nameOpp").textContent=S.opp.name; }
+  function setPhase(p){ S.phase=p; $("phaseText").textContent=p; }
+  function updateRound(){ $("roundText").textContent=`(Round ${S.round})`; }
+  function other(p){return p==='you'?'opp':'you'}
+
+  function cardTextHTML(c){
+    if(c.joker && c.trRank && c.trSuit){
+      return `<div class="big">${c.trRank}${c.trSuit}</div><div class="tagJoker">(JOKER)</div>`;
+    }
+    if(c.joker){ return `<div class="big jokerLabel">JOKER</div>`; }
+    return `<div class="big">${c.rank}${c.suit}</div>`;
+  }
+
+  function cardEl(c, selectable=false, idx=0){
+    const el=document.createElement("div"); el.className="card "+(c.back?"back":"face"); el.dataset.index=idx; el.innerHTML=c.back?"":cardTextHTML(c);
+    if(selectable){ el.style.cursor="pointer"; el.onclick=()=>{ el.classList.toggle("selected"); }; }
+    return el;
+  }
+
+  function hasUnresolvedJoker(hand){
+    return hand.some(c => c.joker && !(c.trRank && c.trSuit));
+  }
+
+  function render(){
+    updateRound();
+    $("p1Light").classList.toggle("on", (S.turn==='you' && !S.loserNeedsRoulette));
+    $("p2Light").classList.toggle("on", (S.turn==='opp' && !S.loserNeedsRoulette));
+    $("board").classList.toggle("activePanel", !S.loserNeedsRoulette);
+    $("roulette").classList.toggle("activePanel", S.loserNeedsRoulette);
+
+    const needYouTransform = (S.phase==='River' && hasUnresolvedJoker(S.you.hand));
+    $("btnReady").disabled = !(S.turn==='you' && !S.loserNeedsRoulette && (S.phase==='Flop'||S.phase==='Turn'||S.phase==='River')) || needYouTransform;
+
+    const opp=$("oppHand"); opp.innerHTML=""; const showOpp=(S.phase==='Showdown'||S.loserNeedsRoulette); S.opp.hand.forEach((c,i)=> opp.appendChild(showOpp? cardEl(c,false,i) : cardEl({back:true},false,i)));
+    const hand=$("hand"); hand.innerHTML=""; S.you.hand.forEach((c,i)=> hand.appendChild(cardEl(c,true,i)));
+    const flat=[...document.querySelectorAll("#shared .card")];
+    S.shared.slice(0,5).forEach((c,i)=>{ const el=flat[i]; el.className="card "+(c.back?"back":"face"); el.innerHTML=c.back?"":cardTextHTML(c); });
+
+    if(needYouTransform){
+      $("resultLine").innerHTML = "Your JOKER must transform to one of the revealed community cards (tap one).";
+    }
+  }
+
+  function drawNonJoker(){
+    let c = S.deck.shift();
+    while(c && c.joker){ S.deck.push({joker:true}); S.deck=shuffle(S.deck); c=S.deck.shift(); }
+    return c;
+  }
+  function revealTo(n){
+    for(let i=0;i<n;i++){
+      if(S.shared[i].back){
+        S.shared[i]=drawNonJoker();
+      }
+    }
+    render();
+  }
+  function exchange(hand, idxs){ idxs.sort((a,b)=>b-a).forEach(i=>{ hand[i]=S.deck.shift(); }); render(); }
+
+  function phaseStartFlop(){ setPhase("Flop"); revealTo(3); S.exchangeFirst = Math.random()<0.5 ? 'you':'opp'; S.turn = S.exchangeFirst; S.exchangeStep = 0; render(); if(S.turn==='opp') aiAct(); }
+
+  function nextPhaseFrom(current){
+    if(current==='Flop'){ revealTo(4); setPhase('Turn'); S.exchangeFirst = other(S.exchangeFirst); S.turn=S.exchangeFirst; S.exchangeStep=0; render(); if(S.turn==='opp') aiAct(); }
+    else if(current==='Turn'){ revealTo(5); setPhase('River'); S.exchangeFirst = other(S.exchangeFirst); S.turn=S.exchangeFirst; S.exchangeStep=0; render(); if(S.turn==='opp') aiAct(); }
+    else if(current==='River'){ setPhase('Showdown'); showdown(); }
+  }
+
+  function newRound(){
+    timers.forEach(t=>clearTimeout(t)); timers=[];
+    S.turn='you'; S.loserNeedsRoulette=false; S.loserHadJoker=false; S.winnerHadJoker=false; S.exchangeStep=0; S.exchangeFirst='you';
+    S.deck=shuffle(deckNew());
+    S.shared=[{back:true},{back:true},{back:true},{back:true},{back:true}];
+    S.you.hand=deal(S.deck,2); S.opp.hand=deal(S.deck,2);
+    setPhase('Dealing'); $("resultLine").textContent=""; render();
+    requestAnimationFrame(()=>{ createHoles(); });
+    timers.push(setTimeout(phaseStartFlop, 1000));
+  }
+
+  // flash helper
+  function flash(color){
+    const f=$("flash");
+    f.style.background = color==='white' ? 'rgba(255,255,255,0.6)' : 'rgba(255,0,0,0.25)';
+    f.classList.remove("flashOnce"); void f.offsetWidth; f.classList.add("flashOnce");
+  }
+
+  function showdown(){
+    render();
+    const you=S.you.hand.concat(S.shared.slice(0,5));
+    const opp=S.opp.hand.concat(S.shared.slice(0,5));
+    const yh=bestHand(you), oh=bestHand(opp);
+    let line=`${S.you.name}: ${yh.name}<br/>${S.opp.name}: ${oh.name}`;
+    const cmp = yh.score>oh.score?1:yh.score<oh.score?-1:0;
+    if(cmp===0){
+      $("resultLine").innerHTML=line+"<br/>— Tie —";
+      timers.push(setTimeout(()=>{ S.round++; newRound(); }, 5000));
+      return;
+    }
+    const loser = (cmp>0)? S.opp : S.you;
+    const winner = (cmp>0)? S.you : S.opp;
+    $("resultLine").innerHTML= line + `<br/>→ ${winner.name} wins`;
+    const youJ=S.you.hand.some(c=>c.joker), oppJ=S.opp.hand.some(c=>c.joker);
+    S.loserHadJoker = loser==S.you?youJ:oppJ; S.winnerHadJoker = winner==S.you?youJ:oppJ;
+    S.loserNeedsRoulette=true;
+    startRouletteCountdown(8, loser);
+  }
+
+  // ===== Roulette =====
+  let rrTimer=null;
+  function createHoles(){
+    if(creatingHoles) return;
+    creatingHoles=true;
+    const drum=$("drum");
+    [...drum.querySelectorAll('.hole')].forEach(n=>n.remove());
+
+    const size = drum.clientWidth;
+    const R = size/2 - 48;
+    const cx = size/2, cy = size/2;
+    const degs=[90,30,330,270,210,150];
+    for(let i=0;i<6;i++){
+      const a = degs[i]*Math.PI/180;
+      const x = cx + R*Math.cos(a);
+      const y = cy - R*Math.sin(a);
+      const hole=document.createElement('div'); hole.className='hole'; hole.dataset.i=i;
+      hole.style.left=(x-42)+'px'; hole.style.top=(y-42)+'px';
+      const inner=document.createElement('div'); inner.id='b'+i; hole.appendChild(inner);
+      drum.appendChild(hole);
+    }
+    creatingHoles=false;
+
+    if(!resizeObs){
+      resizeObs=new ResizeObserver(()=>{ createHoles(); });
+      resizeObs.observe(drum);
+    }
+  }
+
+  function startRouletteCountdown(seconds, loser){
+    $("roulette").classList.add('activePanel');
+    let t=seconds;
+    const info=$('rouletteInfo');
+    info.textContent = `Russian Roulette in ${t}s`;
+    clearInterval(rrTimer);
+    rrTimer=setInterval(()=>{
+      t--;
+      info.textContent = `Russian Roulette in ${t}s`;
+      if(t<=0){ clearInterval(rrTimer); loadBulletsAndSpin(loser); }
+    },1000);
+  }
+
+  function loadBulletsAndSpin(loser){
+    // Prepare bullets count
+    const base=Math.min(6,S.round);
+    const extra=S.winnerHadJoker?1:0;
+    const bullets=Math.min(6, base+extra);
+    createHoles();
+    const idxs=[0,1,2,3,4,5]; shuffle(idxs);
+    const chosen=idxs.slice(0,bullets);
+    for(let i=0;i<6;i++){
+      const el=$('b'+i); if(el) el.className = chosen.includes(i)? 'bullet' : '';
+    }
+    $("rouletteInfo").textContent=`Bullets loaded: ${bullets}`;
+
+    // If loser had a Joker, skip one spin
+    if(S.loserHadJoker){
+      $("rouletteInfo").textContent = `Loser had JOKER → Free pass`;
+      S.loserNeedsRoulette=false; S.round++; newRound(); render(); return;
+    }
+
+    setTimeout(()=>{
+      const idx=Math.floor(Math.random()*6);
+      // Spin
+      const degs=[90,30,330,270,210,150];
+      const drum=$('drum');
+      drum.style.transform='rotate(0deg)';
+      requestAnimationFrame(()=>{
+        const spins=4;
+        const targetDeg=degs[idx];
+        const rot=spins*360 + (targetDeg-90);
+        drum.style.transform=`rotate(${rot}deg)`;
+      });
+      // After spin ends
+      setTimeout(()=>{
+        const hole = document.querySelector(`.hole[data-i="${idx}"]`);
+        if(hole) hole.classList.add('selected');
+        const target=document.getElementById('b'+idx);
+        const hit = target && target.classList.contains('bullet');
+
+        // SAFE/BANG text
+        $('rouletteInfo').innerHTML = hit
+          ? `<span class="bangText">BANG!</span>`
+          : `<span class="safeText">SAFE</span>`;
+
+        const loserIsYou = (loser==S.you);
+
+        if(hit){
+          if(loserIsYou){
+            flash('red');
+            $("dwinName").textContent = S.opp.name; $("dloseName").textContent = S.you.name;
+            show("defeat"); backHomeIn('defBack',5,true);
+          }else{
+            flash('white');
+            $("winName").textContent = S.you.name; $("loseName").textContent = S.opp.name;
+            show("victory"); backHomeIn('vicBack',5,true);
+          }
+        }else{
+          S.loserNeedsRoulette=false; S.round++; newRound(); render();
+        }
+      }, 2300);
+    }, 1200);
+  }
+
+  function afterExchange(){
+    if(S.exchangeStep===0){ S.exchangeStep=1; S.turn=other(S.exchangeFirst); render(); if(S.turn==='opp') aiAct(); }
+    else { nextPhaseFrom(S.phase); }
+  }
+
+  // AI: if River and has unresolved Joker, transform to best community rank
+  function aiResolveJokerIfNeeded(){
+    if(S.phase!=='River') return;
+    const shared = S.shared.slice(0,5);
+    const idx = S.opp.hand.findIndex(c => c.joker && !(c.trRank && c.trSuit));
+    if(idx<0) return;
+    let best=null, bestScore=-1;
+    for(const t of shared){
+      if(t.back) continue;
+      const tempHand = S.opp.hand.map((c,i)=> i===idx ? {joker:true,trRank:t.rank,trSuit:t.suit} : c);
+      const {score} = bestFrom7(tempHand.concat(shared));
+      if(score>bestScore){ bestScore=score; best={rank:t.rank,suit:t.suit}; }
+    }
+    if(best){
+      S.opp.hand[idx].trRank=best.rank;
+      S.opp.hand[idx].trSuit=best.suit;
+    }
+  }
+
+  function aiAct(){
+    aiResolveJokerIfNeeded();
+    const knownShared=S.shared.filter(c=>!c.back).slice(0,5);
+    const deckSnap=S.deck.slice();
+    const choice=aiChooseExchange(S.opp.hand, knownShared, deckSnap);
+    const oppEls=[...document.querySelectorAll("#oppHand .card")];
+    choice.forEach(i=>{ if(oppEls[i]) oppEls[i].classList.add("selected-opp"); });
+    setTimeout(()=>{
+      if(choice.length) exchange(S.opp.hand, choice);
+      choice.forEach(i=>{ if(oppEls[i]) oppEls[i].classList.remove("selected-opp"); });
+      afterExchange();
+    }, 700);
+  }
+
+  $("btnReady").onclick=()=>{
+    if(!(S.turn==='you')) return;
+    const sel=[...document.querySelectorAll("#hand .card.selected")].map(e=>+e.dataset.index);
+    if(sel.length>2) return alert("Up to 2 cards.");
+    if(sel.length) exchange(S.you.hand, sel);
+    document.querySelectorAll("#hand .card.selected").forEach(el=>el.classList.remove("selected"));
+    afterExchange();
+  };
+  $("btnSurrender").onclick=()=>{ $("dwinName").textContent=S.opp.name; $("dloseName").textContent=S.you.name; show("defeat"); backHomeIn('defBack',5,true); };
+
+  // Joker transform (you)
+  let jokerPending=null;
+  document.addEventListener('click',(e)=>{
+    const t=e.target.closest('.card'); if(!t) return;
+    const p=t.parentElement;
+    if(p && p.id==='hand'){ const idx=+t.dataset.index; const card=S.you.hand[idx]; if(card && card.joker){ jokerPending=idx; $("resultLine").innerHTML='JOKER selected<br/>Tap a revealed community card to transform.'; } }
+    if(p && p.closest('#shared') && jokerPending!==null){
+      const flat=[...document.querySelectorAll('#shared .card')]; const sIndex=flat.indexOf(t); if(sIndex>-1){ const target=S.shared[sIndex]; if(target && !target.back){ const j=S.you.hand[jokerPending]; j.trRank=target.rank; j.trSuit=target.suit; jokerPending=null; $("resultLine").innerHTML=`${S.you.name} transformed JOKER<br/>→ ${j.trRank}${j.trSuit}`; render(); } }
+    }
+  });
+
+  function start(nick){
+    timers.forEach(t=>clearTimeout(t)); timers=[];
+    S.you.name=nick||"PLAYER"; S.opp.name=randomAINick(); updateNames(); S.round=1;
+    createHoles();
+    S.you.alive=true; S.opp.alive=true;
+    S.deck=shuffle(deckNew());
+    S.shared=[{back:true},{back:true},{back:true},{back:true},{back:true}];
+    S.you.hand=deal(S.deck,2); S.opp.hand=deal(S.deck,2);
+    setPhase('Dealing'); $("resultLine").textContent=""; render();
+    setTimeout(phaseStartFlop, 1000);
+  }
+
+  return { start };
+})();
+
+function backHomeIn(id,sec,hard){
+  let t=sec; const el=$(id);
+  const iv=setInterval(()=>{ el.textContent=`Back to Home in ${t--}s…`; if(t<0){ clearInterval(iv); show('home'); if(hard) location.reload(); } },1000);
+}
+
+// Connect screen → AI fallback
+function startConnectingThenAI(nick){
+  show("connecting");
+  let t=8;
+  const span=$('count');
+  span.textContent=t;
+  const iv=setInterval(()=>{
+    t--; span.textContent=t;
+    if(t<=0){
+      clearInterval(iv);
+      // Fallback to AI
+      show("play");
+      Game.start(nick);
+    }
+  },1000);
+}
+
+// Orientation overlay
+</script>
+</body>
+</html>
