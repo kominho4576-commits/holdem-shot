@@ -64,6 +64,8 @@ input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6
 #flash{position:fixed; pointer-events:none; inset:0; background:rgba(255,0,0,0.25); opacity:0; z-index:999; }
 @keyframes flash1 { 0%{opacity:0} 15%{opacity:1} 100%{opacity:0} }
 .flashOnce{ animation: flash1 200ms ease-out 1; }
+.spinner{width:40px;height:40px;border:5px solid var(--soft);border-top-color:var(--ink);border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
@@ -73,7 +75,10 @@ input{border:3px solid var(--ink); background:#fff; color:var(--ink); padding:.6
 const API_BASE = "https://holdem-shot.onrender.com";
 let socket = null;
 let matchTimer = null;
+let myId = null;
+let currentRoomId = null;
 
+// ========== UI ==========
 const app = document.getElementById("app");
 app.innerHTML = `
   <div id="screen-home" class="screen active" aria-hidden="false">
@@ -195,11 +200,15 @@ $("retry").onclick=(e)=>{ e.preventDefault(); refreshServerDot(); };
 function ensureSocket(cb){
   if (socket?.connected) return cb?.();
   socket = io(API_BASE, { transports:["websocket","polling"] });
-  socket.once("connect", ()=> cb?.());
+  socket.once("connect", ()=>{
+    myId = socket.id;
+    cb?.();
+  });
+  socket.on("connect", ()=>{ myId = socket.id; });
   socket.once("connect_error", ()=> alert("Server connection failed."));
 }
 
-// --------- Quick Match ----------
+// ======== 매칭 / 룸 ========
 $("btnQuick").onclick = async ()=>{
   if (!await serverHealthy()) { alert("Server is offline."); refreshServerDot(); return; }
   ensureSocket(()=>{
@@ -213,23 +222,12 @@ $("btnQuick").onclick = async ()=>{
       if(t<=0){
         clearInterval(matchTimer);
         socket.emit("qm:leave");
-        startGame(nick, randomAINick()); // AI 폴백
+        alert("No opponent found. AI fallback not enabled in multiplayer mode yet.");
+        location.reload();
       }
     },1000);
   });
 };
-const randomAINick = ()=> {
-  const a=["Swift","Silent","Cool","Neon","Crimson","Azure","Lucky","Wild","Ghost","Iron","Rapid","Mellow","Classic","Turbo","Cosmic"];
-  const b=["Raven","Wolf","Tiger","Hawk","Viper","Falcon","Panda","Otter","Lynx","Cobra","Eagle","Shark","Bison","Koala","Gecko"];
-  return `${a[Math.floor(Math.random()*a.length)]}_${b[Math.floor(Math.random()*b.length)]}_${Math.floor(Math.random()*90+10)}`;
-};
-socket?.on?.("qm:queued", ()=>{/* 대기중 */});
-socket?.on?.("qm:found", ({roomId, opponentNick})=>{
-  if(matchTimer){ clearInterval(matchTimer); matchTimer=null; }
-  startGame(getNick(), opponentNick || "PLAYER2");
-});
-
-// --------- Create / Join Room ----------
 $("btnCreate").onclick = async ()=>{
   if (!await serverHealthy()) { alert("Server is offline."); refreshServerDot(); return; }
   ensureSocket(()=> socket.emit("room:create", { nick:getNick() }) );
@@ -241,67 +239,121 @@ $("btnJoin").onclick = async ()=>{
   if(!code) return alert("Enter room code.");
   ensureSocket(()=> socket.emit("room:join", { roomId:code, nick:getNick() }) );
 };
+
+// 매칭/룸 이벤트
+socket?.on?.("qm:queued", ()=>{/* 대기중 */});
+socket?.on?.("qm:found", ({roomId, opponentNick, youNick})=>{
+  if(matchTimer){ clearInterval(matchTimer); matchTimer=null; }
+  currentRoomId = roomId;
+  startPlayUI(youNick||getNick(), opponentNick||"PLAYER2");
+});
 socket?.on?.("room:created", ({roomId})=>{ $("roomCode").value = roomId; });
-socket?.on?.("room:ready", ({roomId,opponentNick})=> startGame(getNick(), opponentNick||"PLAYER2") );
+socket?.on?.("room:ready", ({roomId,opponentNick, youNick})=>{
+  currentRoomId = roomId;
+  startPlayUI(youNick||getNick(), opponentNick||"PLAYER2");
+});
 socket?.on?.("room:error", ({message})=> alert(message||"Room error"));
-socket?.on?.("room:peer-left", ()=> alert("Opponent left."));
+socket?.on?.("room:peer-left", ()=> { alert("Opponent left."); location.reload(); });
 
-// ========= GAME (내 패 항상 표시) =========
-const SUITS=["♠","♥","♦","♣"], RANKS=["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
-const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j]]}return a};
-const deal=(d,n)=>d.splice(0,n);
-const deckNew=_=>{const d=[]; for(const s of SUITS){ for(const r of RANKS){ d.push({rank:r,suit:s}); } } d.push({joker:true}); d.push({joker:true}); return d;};
-const cardHTML=(c)=> c.joker ? `<div class="big jokerLabel">JOKER</div>` : `<div class="big">${c.rank}${c.suit}</div>`;
+// ======== 게임 렌더링 ========
+const state = {
+  myHandSel: new Set(),         // 교환 선택(내 카드 index)
+  lastState: null
+};
 
-const Game=(()=>{
-  const S={ you:{name:"PLAYER",hand:[]}, opp:{name:"OPP",hand:[]}, shared:[], deck:[], phase:"Dealing", round:1 };
+function startPlayUI(nickYou, nickOpp){
+  $("nameYou").textContent = nickYou;
+  $("nameOpp").textContent = nickOpp;
+  show("play");
+}
 
-  function setPhase(p){ S.phase=p; $("phaseText").textContent=p; $("roundText").textContent=`(Round ${S.round})`; }
-  function render(){
-    // 상대패(쇼다운 전 back)
-    const opp=$("oppHand"); opp.innerHTML="";
-    const revealOpp = (S.phase==="Showdown");
-    S.opp.hand.forEach(c=> opp.insertAdjacentHTML("beforeend", `<div class="card ${revealOpp?'face':'back'}">${revealOpp?cardHTML(c):""}</div>`));
-    // 내패(항상 face)
-    const hand=$("hand"); hand.innerHTML="";
-    S.you.hand.forEach(c=> hand.insertAdjacentHTML("beforeend", `<div class="card face">${cardHTML(c)}</div>`));
-    // 공유카드
-    const cells=[...document.querySelectorAll("#shared .card")];
-    S.shared.slice(0,5).forEach((c,i)=>{ cells[i].className="card "+(c.back?"back":"face"); cells[i].innerHTML=c.back?"":cardHTML(c); });
-    $("btnReady").disabled = !(S.phase==="Flop"||S.phase==="Turn"||S.phase==="River");
+function cardHTML(c){
+  if (!c) return "";
+  if (c.joker) return `<div class="big jokerLabel">JOKER</div>`;
+  return `<div class="big">${c.rank}${c.suit}</div>`;
+}
+
+// 서버에서 내려오는 전체 상태를 기준으로 렌더
+socket?.on?.("game:state", (S)=>{
+  state.lastState = S;
+  const me = myId;
+  const youId = me;
+  const oppId = S.players.find(p=>p!==youId);
+
+  $("phaseText").textContent = S.phaseLabel;
+  $("roundText").textContent = `(Round ${S.round})`;
+
+  // 라이트 (내 턴표시)
+  const myTurn = S.turn === youId;
+  $("p1Light").classList.toggle("on", myTurn);
+  $("p2Light").classList.toggle("on", !myTurn);
+
+  // 상대 패 (쇼다운 전 back)
+  const opp = $("oppHand"); opp.innerHTML="";
+  const revealOpp = (S.phase === "showdown");
+  (S.hands[oppId] || []).forEach(c=>{
+    opp.insertAdjacentHTML("beforeend", `<div class="card ${revealOpp?'face':'back'}">${revealOpp?cardHTML(c):""}</div>`);
+  });
+
+  // 내 패 (항상 face)
+  const hand = $("hand"); hand.innerHTML="";
+  (S.hands[youId] || []).forEach((c,idx)=>{
+    const selected = state.myHandSel.has(idx) ? "selected" : "";
+    hand.insertAdjacentHTML("beforeend", `<div class="card face ${selected}" data-idx="${idx}">${cardHTML(c)}</div>`);
+  });
+
+  // 공유 카드
+  const cells=[...document.querySelectorAll("#shared .card")];
+  for(let i=0;i<5;i++){
+    const cc = S.community[i];
+    if(!cc || cc.back){
+      cells[i].className="card back"; cells[i].innerHTML="";
+    }else{
+      cells[i].className="card face"; cells[i].innerHTML=cardHTML(cc);
+    }
   }
-  function drawNonJoker(){
-    let c=S.deck.shift();
-    while(c && c.joker){ S.deck.push({joker:true}); S.deck=shuffle(S.deck); c=S.deck.shift(); }
-    return c;
-  }
-  function nextPhase(){
-    if(S.phase==="Dealing"){ setPhase("Flop"); for(let i=0;i<3;i++) S.shared[i]=drawNonJoker(); render(); }
-    else if(S.phase==="Flop"){ setPhase("Turn"); S.shared[3]=drawNonJoker(); render(); }
-    else if(S.phase==="Turn"){ setPhase("River"); S.shared[4]=drawNonJoker(); render(); }
-    else if(S.phase==="River"){ setPhase("Showdown"); render(); }
-  }
-  function newRound(){
-    S.deck=shuffle(deckNew());
-    S.shared=[{back:true},{back:true},{back:true},{back:true},{back:true}];
-    S.you.hand=deal(S.deck,2);
-    S.opp.hand=deal(S.deck,2);
-    setPhase("Dealing"); render();
-    setTimeout(nextPhase, 800);
-  }
 
-  $("btnReady").onclick=()=> nextPhase();
-  $("btnSurrender").onclick=()=> location.reload();
+  // 버튼 상태
+  const btnReady = $("btnReady");
+  const canSelect = S.phase === "flop-exchange" || S.phase === "turn-exchange";
+  btnReady.textContent = canSelect ? `Exchange / Ready` : `Ready`;
+  btnReady.disabled = !S.allowReady[youId];
 
-  function start(nickYou, nickOpp){
-    S.you.name=nickYou||"PLAYER"; S.opp.name=nickOpp||"PLAYER2";
-    $("nameYou").textContent=S.you.name; $("nameOpp").textContent=S.opp.name;
-    show("play"); newRound();
+  // 교환 가능 페이즈에서만 클릭 선택 허용(최대 2장)
+  hand.querySelectorAll(".card").forEach(el=>{
+    el.onclick = ()=>{
+      if(!canSelect) return;
+      const idx = Number(el.dataset.idx);
+      if(state.myHandSel.has(idx)) state.myHandSel.delete(idx);
+      else{
+        if(state.myHandSel.size>=2) return;
+        state.myHandSel.add(idx);
+      }
+      el.classList.toggle("selected");
+    }
+  });
+});
+
+// Ready/Exchange
+$("btnReady").onclick = ()=>{
+  const S = state.lastState; if(!S) return;
+  const youId = myId;
+  const canSelect = S.phase === "flop-exchange" || S.phase === "turn-exchange";
+  if(canSelect && state.myHandSel.size>0){
+    const indices = Array.from(state.myHandSel.values());
+    socket.emit("exchange:request", { roomId: currentRoomId, indices });
+    state.myHandSel.clear();
   }
-  return { start };
-})();
+  socket.emit("player:ready", { roomId: currentRoomId });
+};
 
-function startGame(nickYou, nickOpp){ Game.start(nickYou, nickOpp); }
+$("btnSurrender").onclick = ()=>{
+  if(currentRoomId) socket.emit("leaveRoom", { roomId: currentRoomId });
+  location.reload();
+};
+
+// ======== 연결된 뒤에만 리스너 보장 ========
+ensureSocket(()=>{ /* noop: listeners already bound via optional chaining */ });
 
 // SW (optional)
 if('serviceWorker' in navigator){ window.addEventListener('load', ()=> navigator.serviceWorker.register('sw.js').catch(()=>{})); }
