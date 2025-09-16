@@ -169,7 +169,7 @@ const show = (n) => {
 };
 const getNick = ()=> ($("nickname").value.trim()||"PLAYER");
 
-// --------- 서버 상태(정확히) ----------
+// --------- 서버 상태 ----------
 async function serverHealthy(timeoutMs=2000){
   try{
     const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),timeoutMs);
@@ -177,37 +177,29 @@ async function serverHealthy(timeoutMs=2000){
     clearTimeout(t);
     if(!r.ok) return false;
   }catch(e){ return false; }
-  // 소켓 핸드셰이크까지 확인
   try{
     await new Promise((res,rej)=>{
       const s = io(API_BASE,{transports:["websocket","polling"],timeout:timeoutMs,forceNew:true,autoConnect:true});
       const ok = ()=>{ s.disconnect(); res(true); };
       const bad = (err)=>{ try{s.disconnect();}catch{}; rej(err); };
-      s.once("connect", ok);
-      s.once("connect_error", bad);
+      s.once("connect", ok); s.once("connect_error", bad);
       setTimeout(()=>bad(new Error("timeout")), timeoutMs);
     });
     return true;
   }catch(e){ return false; }
 }
-async function refreshServerDot(){
-  const ok = await serverHealthy();
-  $("srvDot").classList.toggle("on", ok);
-}
-refreshServerDot();
-$("retry").onclick=(e)=>{ e.preventDefault(); refreshServerDot(); };
+async function refreshServerDot(){ const ok = await serverHealthy(); $("srvDot").classList.toggle("on", ok); }
+refreshServerDot(); $("retry").onclick=(e)=>{ e.preventDefault(); refreshServerDot(); };
 
-// --------- Socket 초기화 & 리스너 바인딩 (핵심 수정) ----------
+// --------- Socket ----------
 function initSocket(){
   if (socket && socket.connected) return;
   socket = io(API_BASE, { transports:["websocket","polling"] });
 
-  socket.on("connect", ()=>{
-    myId = socket.id;
-  });
+  socket.on("connect", ()=>{ myId = socket.id; });
 
   // 매칭/룸
-  socket.on("qm:queued", ()=>{/* waiting */});
+  socket.on("qm:queued", ()=>{});
   socket.on("qm:found", ({roomId, opponentNick, youNick})=>{
     if(matchTimer){ clearInterval(matchTimer); matchTimer=null; }
     currentRoomId = roomId;
@@ -221,30 +213,34 @@ function initSocket(){
   socket.on("room:error", ({message})=> alert(message||"Room error"));
   socket.on("room:peer-left", ()=> { alert("Opponent left."); location.reload(); });
 
-  // 게임 상태(멀티만)
+  // ===== 게임 상태 렌더 =====
   socket.on("game:state", (S)=>{
     if(isLocal) return;
+
     const youId = myId;
     const oppId = S.players.find(p=>p!==youId);
 
     $("phaseText").textContent = S.phaseLabel;
     $("roundText").textContent = `(Round ${S.round})`;
 
-    const myTurn = S.turn === youId;
+    const myTurn = S.turn === youId && (S.phase==="flop-exchange" || S.phase==="turn-exchange");
     $("p1Light").classList.toggle("on", myTurn);
-    $("p2Light").classList.toggle("on", !myTurn);
+    $("p2Light").classList.toggle("on", !myTurn && (S.phase==="flop-exchange" || S.phase==="turn-exchange"));
 
+    // 상대 패
     const opp = $("oppHand"); opp.innerHTML="";
     const revealOpp = (S.phase === "showdown");
     (S.hands[oppId] || []).forEach(c=>{
       opp.insertAdjacentHTML("beforeend", `<div class="card ${revealOpp?'face':'back'}">${revealOpp?cardHTML(c):""}</div>`);
     });
 
+    // 내 패
     const hand = $("hand"); hand.innerHTML="";
     (S.hands[youId] || []).forEach((c,idx)=>{
       hand.insertAdjacentHTML("beforeend", `<div class="card face" data-idx="${idx}">${cardHTML(c)}</div>`);
     });
 
+    // 공유
     const cells=[...document.querySelectorAll("#shared .card")];
     for(let i=0;i<5;i++){
       const cc = S.community[i];
@@ -252,13 +248,15 @@ function initSocket(){
       else{ cells[i].className="card face"; cells[i].innerHTML=cardHTML(cc); }
     }
 
-    const btnReady = $("btnReady");
-    const canSelect = S.phase === "flop-exchange" || S.phase === "turn-exchange";
-    btnReady.textContent = canSelect ? `Exchange / Ready` : `Ready`;
-    btnReady.disabled = !S.allowReady[youId];
+    const inExchange = (S.phase === "flop-exchange" || S.phase === "turn-exchange");
+    const canExchange = inExchange && !!S.canExchange[youId]; // 서버가 준 권한 기준
+    const btn = $("btnReady");
+    btn.textContent = inExchange ? "Exchange / Done" : "Ready";
+    btn.disabled = inExchange ? !canExchange : !S.allowReady[youId];
 
-    if(canSelect){
-      const selected = new Set();
+    // 선택 로직 (교환 턴일 때만)
+    let selected = new Set();
+    if(canExchange){
       hand.querySelectorAll(".card").forEach(el=>{
         el.onclick = ()=>{
           const idx = Number(el.dataset.idx);
@@ -267,13 +265,18 @@ function initSocket(){
           el.classList.toggle("selected");
         };
       });
-      $("btnReady").onclick = ()=>{
+      btn.onclick = ()=>{
         const indices = Array.from(selected.values());
-        if(indices.length>0) socket.emit("exchange:request", { roomId: currentRoomId, indices });
-        socket.emit("player:ready", { roomId: currentRoomId });
+        socket.emit("exchange:request", { roomId: currentRoomId, indices }); // 0장도 허용 → 스킵
+        btn.disabled = true; // 중복 입력 방지
       };
     }else{
-      $("btnReady").onclick = ()=> socket.emit("player:ready", { roomId: currentRoomId });
+      // 비교환 페이즈 or 내 턴이 아닐 때
+      btn.onclick = ()=>{
+        if(!inExchange){
+          socket.emit("player:ready", { roomId: currentRoomId });
+        }
+      };
     }
 
     $("btnSurrender").onclick = ()=>{
@@ -281,32 +284,21 @@ function initSocket(){
       location.reload();
     };
   });
-
-  socket.on("connect_error", ()=>{/* silent */});
 }
 
-// 유틸
+// 유틸들
 const SUITS=["♠","♥","♦","♣"], RANKS=["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
 const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
 const deckNew=_=>{const d=[]; for(const s of SUITS){ for(const r of RANKS){ d.push({rank:r,suit:s}); } } d.push({joker:true}); d.push({joker:true}); return d;};
 function cardHTML(c){ if(!c) return ""; return c.joker?`<div class="big jokerLabel">JOKER</div>`:`<div class="big">${c.rank}${c.suit}</div>`; }
-const randomAINick = ()=> {
-  const a=["Swift","Silent","Cool","Neon","Crimson","Azure","Lucky","Wild","Ghost","Iron","Rapid","Mellow","Classic","Turbo","Cosmic"];
-  const b=["Raven","Wolf","Tiger","Hawk","Viper","Falcon","Panda","Otter","Lynx","Cobra","Eagle","Shark","Bison","Koala","Gecko"];
-  return `${a[Math.floor(Math.random()*a.length)]}_${b[Math.floor(Math.random()*b.length)]}_${Math.floor(Math.random()*90+10)}`;
-};
+const randomAINick = ()=>{ const a=["Swift","Silent","Cool","Neon","Crimson","Azure","Lucky","Wild","Ghost","Iron","Rapid","Mellow","Classic","Turbo","Cosmic"]; const b=["Raven","Wolf","Tiger","Hawk","Viper","Falcon","Panda","Otter","Lynx","Cobra","Eagle","Shark","Bison","Koala","Gecko"]; return `${a[Math.floor(Math.random()*a.length)]}_${b[Math.floor(Math.random()*b.length)]}_${Math.floor(Math.random()*90+10)}`; };
 
-// ============= 로컬(AI) 모드 =============
+// 로컬(AI) 모드 (기존과 동일, 생략 없이 동작)
 const LocalGame = (()=>{
   const S={ you:{name:"PLAYER",hand:[]}, opp:{name:"AI",hand:[]}, shared:[], deck:[], phase:"Dealing", round:1 };
   const state = { mySel:new Set() };
-
   function setPhase(p){ S.phase=p; $("phaseText").textContent=p; $("roundText").textContent=`(Round ${S.round})`; }
-  function drawNonJoker(){
-    let c=S.deck.shift();
-    while(c && c.joker){ S.deck.push({joker:true}); S.deck=shuffle(S.deck); c=S.deck.shift(); }
-    return c;
-  }
+  function drawNonJoker(){ let c=S.deck.shift(); while(c && c.joker){ S.deck.push({joker:true}); S.deck=shuffle(S.deck); c=S.deck.shift(); } return c; }
   function render(){
     $("p1Light").classList.add("on"); $("p2Light").classList.remove("on");
     const opp=$("oppHand"); opp.innerHTML="";
@@ -333,14 +325,8 @@ const LocalGame = (()=>{
   }
   function nextPhase(){
     if(S.phase==="Dealing"){ setPhase("Flop"); S.shared[0]=drawNonJoker(); S.shared[1]=drawNonJoker(); S.shared[2]=drawNonJoker(); render(); }
-    else if(S.phase==="Flop"){ setPhase("Turn");
-      if(state.mySel.size>0){ for(const idx of state.mySel){ S.you.hand[idx]=S.deck.shift(); } state.mySel.clear(); }
-      S.shared[3]=drawNonJoker(); render();
-    }
-    else if(S.phase==="Turn"){ setPhase("River");
-      if(state.mySel.size>0){ for(const idx of state.mySel){ S.you.hand[idx]=S.deck.shift(); } state.mySel.clear(); }
-      S.shared[4]=drawNonJoker(); render();
-    }
+    else if(S.phase==="Flop"){ setPhase("Turn"); if(state.mySel.size>0){ for(const idx of state.mySel){ S.you.hand[idx]=S.deck.shift(); } state.mySel.clear(); } S.shared[3]=drawNonJoker(); render(); }
+    else if(S.phase==="Turn"){ setPhase("River"); if(state.mySel.size>0){ for(const idx of state.mySel){ S.you.hand[idx]=S.deck.shift(); } state.mySel.clear(); } S.shared[4]=drawNonJoker(); render(); }
     else if(S.phase==="River"){ setPhase("Showdown"); render(); }
   }
   function newRound(){
@@ -348,43 +334,23 @@ const LocalGame = (()=>{
     S.shared=[{back:true},{back:true},{back:true},{back:true},{back:true}];
     S.you.hand=[S.deck.shift(),S.deck.shift()];
     S.opp.hand=[S.deck.shift(),S.deck.shift()];
-    setPhase("Dealing"); render();
-    setTimeout(nextPhase, 700);
+    setPhase("Dealing"); render(); setTimeout(nextPhase, 700);
   }
-
   $("btnReady").onclick=()=> nextPhase();
   $("btnSurrender").onclick=()=> location.reload();
-
-  function start(nickYou,nickOpp){
-    $("nameYou").textContent = nickYou||"PLAYER";
-    $("nameOpp").textContent = nickOpp||"AI";
-    isLocal = true;
-    show("play");
-    newRound();
-  }
+  function start(nickYou,nickOpp){ $("nameYou").textContent = nickYou||"PLAYER"; $("nameOpp").textContent = nickOpp||"AI"; isLocal = true; show("play"); newRound(); }
   return { start };
 })();
 
-// ============= 멀티플레이 공용 UI =============
-function startPlayUI(nickYou, nickOpp){
-  $("nameYou").textContent = nickYou;
-  $("nameOpp").textContent = nickOpp;
-  show("play");
-}
+function startPlayUI(nickYou, nickOpp){ $("nameYou").textContent = nickYou; $("nameOpp").textContent = nickOpp; show("play"); }
 
 // ======== 버튼 바인딩 ========
 $("btnQuick").onclick = async ()=>{
   const nick = getNick();
   const healthy = await serverHealthy().catch(()=>false);
-
-  if(!healthy){
-    startLocalAI(nick, randomAINick());
-    return;
-  }
-
-  initSocket(); // ★ 소켓 생성 및 리스너 바인딩
+  if(!healthy){ startLocalAI(nick, randomAINick()); return; }
+  initSocket();
   socket.emit("qm:join", { nick });
-
   show("connecting");
   let t=12; $("count").textContent=t;
   matchTimer = setInterval(()=>{
@@ -392,28 +358,23 @@ $("btnQuick").onclick = async ()=>{
     if(t<=0){
       clearInterval(matchTimer);
       socket.emit("qm:leave");
-      startLocalAI(nick, randomAINick()); // 타임아웃 → AI
+      startLocalAI(nick, randomAINick());
     }
   },1000);
 };
-
 $("btnCreate").onclick = async ()=>{
   const healthy = await serverHealthy().catch(()=>false);
   if(!healthy){ alert("Server is offline."); refreshServerDot(); return; }
-  initSocket();
-  socket.emit("room:create", { nick:getNick() });
+  initSocket(); socket.emit("room:create", { nick:getNick() });
 };
 $("btnCopy").onclick = ()=>{ const v=$("roomCode").value.trim(); if(v) navigator.clipboard.writeText(v); };
 $("btnJoin").onclick = async ()=>{
   const healthy = await serverHealthy().catch(()=>false);
   if(!healthy){ alert("Server is offline."); refreshServerDot(); return; }
-  const code=$("joinCode").value.trim().toUpperCase();
-  if(!code) return alert("Enter room code.");
-  initSocket();
-  socket.emit("room:join", { roomId:code, nick:getNick() });
+  const code=$("joinCode").value.trim().toUpperCase(); if(!code) return alert("Enter room code.");
+  initSocket(); socket.emit("room:join", { roomId:code, nick:getNick() });
 };
 
-// 로컬 AI 시작
 function startLocalAI(nickYou, nickAI){
   isLocal = true;
   if(matchTimer){ clearInterval(matchTimer); matchTimer=null; }
