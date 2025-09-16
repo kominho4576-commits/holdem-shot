@@ -1,0 +1,1 @@
+// gameTypes.ts placeholder

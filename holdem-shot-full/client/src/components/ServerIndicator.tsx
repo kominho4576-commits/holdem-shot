@@ -1,0 +1,1 @@
+// ServerIndicator.tsx placeholder
