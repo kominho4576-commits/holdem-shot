@@ -1,27 +1,19 @@
-// server/src/types.ts
+// server/src/game/types.ts
 
-// 한 장의 카드
-export type Card = {
-  rank: string; // "2" ~ "A", 또는 "JOKER"
-  suit: string; // "S","H","D","C", 또는 "X"(조커)
-};
-
-// 서버에 등록된 사용자
+// 간단 사용자 정보 (소켓 기준)
 export type ServerUser = {
   id: string;        // socket.id
-  nickname: string;  // 플레이어 닉네임
+  nickname: string;  // 닉네임
 };
 
-// 서버 내부에서 관리하는 플레이어
-// server/src/types.ts
-
+// 매치메이커/대기열에서 쓰는 방의 플레이어
 export type RoomPlayer = {
   id: string;        // socket.id
-  nickname: string;  // 닉네임
-  isAI: boolean;     // ✅ 추가: AI 여부
+  nickname: string;  // 표시용 닉네임
+  isAI: boolean;     // ✅ 반드시 포함 (빌드 에러 원인)
 };
 
-// 룸 정보
+// 매치메이커가 관리하는 방 정보 (게임 엔진과 별개)
 export type Room = {
   id: string; // 6자리 코드
   createdAt: number;
@@ -33,6 +25,6 @@ export type Room = {
   };
   meta: {
     mode: "quick" | "code";
-    firstTurnPlayerId?: string;
+    firstTurnPlayerId?: string; // 선턴 고정이 필요할 때 사용
   };
 };
