@@ -1,47 +1,35 @@
-/**
- * 공용 게임 타입
- */
+// server/src/types.ts
 
-export type Stage =
-  | "matching"
-  | "dealing"
-  | "flop"
-  | "turn"
-  | "river"
-  | "showdown"
-  | "roulette"
-  | "result";
+// 한 장의 카드
+export type Card = {
+  rank: string; // "2" ~ "A", 또는 "JOKER"
+  suit: string; // "S","H","D","C", 또는 "X"(조커)
+};
 
-/** 서버에서 관리하는 유저(소켓 기준) */
-export interface ServerUser {
-  id: string;          // socket id
-  nickname: string;
-  isAI?: boolean;
-}
+// 서버에 등록된 사용자
+export type ServerUser = {
+  id: string;        // socket.id
+  nickname: string;  // 플레이어 닉네임
+};
 
-/** 룸의 부가정보 */
-export interface RoomMeta {
-  /** 매칭 방식 */
-  mode: "quick" | "code";
-  /**
-   * 이번 라운드 선공 플레이어(소켓 id).
-   * 라운드 시작 시 랜덤 배정. 없으면 클라이언트/서버 로직에서 추첨 가능.
-   */
-  firstTurnPlayerId?: string;
-}
+// 서버 내부에서 관리하는 플레이어
+export type RoomPlayer = {
+  id: string;        // socket.id
+  nickname: string;  // 표시용 닉네임
+};
 
-/** 룸에 쓰는 타이머 핸들 모음 */
-export interface Timers {
-  aiFallback: ReturnType<typeof setTimeout> | null;
-}
-
-/** 룸 상태(필요 속성만 엄격 지정, 나머지는 확장 가능) */
-export interface Room {
-  id: string;
+// 룸 정보
+export type Room = {
+  id: string; // 6자리 코드
   createdAt: number;
-  players: ServerUser[];
-  stage: Stage | string;
+  players: RoomPlayer[];
+  stage: "matching" | "playing" | "ended";
   round: number;
-  timers: Timers;
-  meta: RoomMeta;
-}
+  timers: {
+    aiFallback: ReturnType<typeof setTimeout> | null;
+  };
+  meta: {
+    mode: "quick" | "code";
+    firstTurnPlayerId?: string;
+  };
+};
