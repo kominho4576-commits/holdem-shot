@@ -24,8 +24,7 @@ app.use(
   cors({
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      if (ALLOWED.length === 0 || ALLOWED.includes(origin))
-        return cb(null, true);
+      if (ALLOWED.length === 0 || ALLOWED.includes(origin)) return cb(null, true);
       return cb(new Error("CORS blocked"), false);
     },
     credentials: true,
@@ -35,13 +34,10 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: {
-    origin: ALLOWED.length ? ALLOWED : true,
-    credentials: true,
-  },
+  cors: { origin: ALLOWED.length ? ALLOWED : true, credentials: true },
 });
 
-// ---------- 타입 ----------
+// ---------- 타입 (이 파일 전용) ----------
 type PlayerRef = {
   id: string;
   nickname: string;
@@ -51,15 +47,7 @@ type PlayerRef = {
   ready: boolean;
   surrendered: boolean;
 };
-
-type Phase =
-  | "dealing"
-  | "flop"
-  | "turn"
-  | "river"
-  | "showdown"
-  | "roulette";
-
+type Phase = "dealing" | "flop" | "turn" | "river" | "showdown" | "roulette";
 type Room = {
   code: string;
   players: PlayerRef[];
@@ -73,9 +61,7 @@ type Room = {
 
 // ---------- 카드 유틸 ----------
 function buildDeck(): Card[] {
-  const ranks: Rank[] = [
-    "2","3","4","5","6","7","8","9","10","J","Q","K","A"
-  ];
+  const ranks: Rank[] = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
   const suits: Suit[] = ["S","H","D","C"];
   const deck: Card[] = [];
   for (const s of suits) for (const r of ranks) deck.push({ rank: r, suit: s });
@@ -92,8 +78,7 @@ function shuffle<T>(a: T[]) {
 function code6() {
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
   let s = "";
-  for (let i = 0; i < 6; i++)
-    s += chars[(Math.random() * chars.length) | 0];
+  for (let i = 0; i < 6; i++) s += chars[(Math.random() * chars.length) | 0];
   return s;
 }
 
@@ -113,8 +98,7 @@ function startRound(room: Room) {
     p.surrendered = false;
   }
   // 개인 카드 2장씩
-  for (let i = 0; i < 2; i++)
-    for (const p of room.players) p.hand.push(room.deck.pop()!);
+  for (let i = 0; i < 2; i++) for (const p of room.players) p.hand.push(room.deck.pop()!);
   // 공유 카드 5장 (조커 제외)
   while (room.board.length < 5 && room.deck.length) {
     const c = room.deck.pop()!;
@@ -133,10 +117,7 @@ function reveal(room: Room, which: Phase) {
 }
 function doExchange(room: Room, idx: 0 | 1, indices: number[]) {
   const p = room.players[idx];
-  const safe = [...new Set(indices.filter((i) => i === 0 || i === 1))].slice(
-    0,
-    2
-  );
+  const safe = [...new Set(indices.filter((i) => i === 0 || i === 1))].slice(0, 2);
   for (const i of safe) p.hand[i] = room.deck.pop()!;
 }
 
@@ -180,7 +161,7 @@ function joinRoom(room: Room, socket: Socket, nickname: string, isAI = false) {
   }
   const p: PlayerRef = {
     id: socket.id,
-    nickname: nickname || (isAI ? aiName() : `PLAYER${room.players.length+1}`),
+    nickname: nickname || (isAI ? aiName() : `PLAYER${room.players.length + 1}`),
     isAI,
     socketId: socket.id,
     hand: [],
@@ -251,11 +232,10 @@ io.on("connection", (socket) => {
   socket.on("exchange", ({ code, indices }) => {
     const room = rooms.get(code);
     if (!room) return;
-    if (!["flop","turn","river"].includes(room.phase)) return;
+    if (!["flop", "turn", "river"].includes(room.phase)) return;
     const meIdx = room.players.findIndex((p) => p.id === socket.id);
     if (meIdx < 0) return;
-    const expected =
-      room.exchangeStep === 0 ? room.turnIndex : (room.turnIndex === 0 ? 1 : 0);
+    const expected = room.exchangeStep === 0 ? room.turnIndex : (room.turnIndex === 0 ? 1 : 0);
     if (meIdx !== expected) return;
     doExchange(room, meIdx as 0 | 1, indices || []);
     emitState(room);
@@ -303,30 +283,38 @@ io.on("connection", (socket) => {
 function doShowdown(room: Room) {
   room.phase = "showdown";
   emitState(room);
+
   const [A, B] = room.players;
   const evA = evaluate7([...A.hand, ...room.board]);
   const evB = evaluate7([...B.hand, ...room.board]);
+
   let winner: 0 | 1 | -1 = -1;
-  const cmp = evA.category !== evB.category
-    ? evA.category - evB.category
-    : (() => {
-        for (let i = 0; i < Math.max(evA.tiebreak.length, evB.tiebreak.length); i++) {
-          const d = (evA.tiebreak[i] ?? 0) - (evB.tiebreak[i] ?? 0);
-          if (d) return d;
-        }
-        return 0;
-      })();
+  const cmp =
+    evA.category !== evB.category
+      ? evA.category - evB.category
+      : (() => {
+          for (let i = 0; i < Math.max(evA.tiebreak.length, evB.tiebreak.length); i++) {
+            const d = (evA.tiebreak[i] ?? 0) - (evB.tiebreak[i] ?? 0);
+            if (d) return d;
+          }
+          return 0;
+        })();
+
   if (cmp > 0) winner = 0;
   else if (cmp < 0) winner = 1;
   else winner = -1;
+
   io.to(room.code).emit("round:result", { round: room.round, winner });
+
   if (winner === -1) return proceedNextRound(room);
   const loser = winner === 0 ? 1 : 0;
   startRoulette(room, loser as 0 | 1);
 }
+
 function startRoulette(room: Room, loserIdx: 0 | 1) {
   room.phase = "roulette";
   emitState(room);
+
   const bullets = Math.min(room.round, 6);
   const slots = new Set<number>();
   while (slots.size < bullets) slots.add((Math.random() * 6) | 0);
@@ -334,6 +322,7 @@ function startRoulette(room: Room, loserIdx: 0 | 1) {
   const startPos = (Math.random() * 6) | 0;
   const stopPos = (Math.random() * 6) | 0;
   const spins = 2 + ((Math.random() * 4) | 0);
+
   io.to(room.code).emit("roulette:start", {
     bullets,
     chambers: 6,
@@ -342,9 +331,11 @@ function startRoulette(room: Room, loserIdx: 0 | 1) {
     spins,
     stopPos,
   });
+
   setTimeout(() => {
     const bang = bulletSlots.includes(stopPos);
     io.to(room.code).emit("roulette:result", { bang, loser: loserIdx });
+
     setTimeout(() => {
       if (bang) {
         io.to(room.code).emit("game:end", {
@@ -358,6 +349,7 @@ function startRoulette(room: Room, loserIdx: 0 | 1) {
     }, 1000);
   }, 4800);
 }
+
 function proceedNextRound(room: Room) {
   room.round += 1;
   startRound(room);
