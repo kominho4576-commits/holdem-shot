@@ -1,4 +1,3 @@
-// client/src/pages/Home.tsx
 import { useEffect, useMemo, useState } from "react";
 import { isOnline, onOnlineChange, pingServer, socket } from "../lib/socket";
 
@@ -29,10 +28,8 @@ export default function HomePage() {
   function startOfflineQuick() {
     const me = nickname.trim() || "PLAYER";
     const ai = randomAI();
-    // 라우팅 방식에 맞춰 경로 이동 (Game.tsx에서 mode=offline 처리)
-    window.location.href = `/game?mode=offline&me=${encodeURIComponent(
-      me
-    )}&op=${encodeURIComponent(ai)}`;
+    // Game.tsx에서 mode=offline 처리
+    window.location.href = `/game?mode=offline&me=${encodeURIComponent(me)}&op=${encodeURIComponent(ai)}`;
   }
 
   // 퀵매치: 오프라인이면 AI, 온라인이면 서버 매칭
@@ -41,6 +38,7 @@ export default function HomePage() {
       startOfflineQuick();
       return;
     }
+    if (busy) return;
     setBusy("quick");
     const me = (nickname || "").trim() || "PLAYER";
     socket.emit(
@@ -53,9 +51,7 @@ export default function HomePage() {
           startOfflineQuick();
           return;
         }
-        window.location.href = `/game?room=${resp.roomId}&nick=${encodeURIComponent(
-          me
-        )}`;
+        window.location.href = `/game?room=${resp.roomId}&nick=${encodeURIComponent(me)}`;
       }
     );
   }
@@ -65,6 +61,7 @@ export default function HomePage() {
       alert("Offline. Create Room is available only online.");
       return;
     }
+    if (busy) return;
     setBusy("create");
     const me = (nickname || "").trim() || "PLAYER";
     socket.emit(
@@ -76,9 +73,7 @@ export default function HomePage() {
           alert(resp?.error ?? "Create room failed.");
           return;
         }
-        window.location.href = `/game?room=${resp.roomId}&nick=${encodeURIComponent(
-          me
-        )}`;
+        window.location.href = `/game?room=${resp.roomId}&nick=${encodeURIComponent(me)}`;
       }
     );
   }
@@ -89,7 +84,7 @@ export default function HomePage() {
       return;
     }
     const code = prompt("Enter 6-character room code");
-    if (!code) return;
+    if (!code || busy) return;
     setBusy("join");
     const me = (nickname || "").trim() || "PLAYER";
     socket.emit(
@@ -101,9 +96,7 @@ export default function HomePage() {
           alert(resp?.error ?? "Join failed.");
           return;
         }
-        window.location.href = `/game?room=${resp.roomId}&nick=${encodeURIComponent(
-          me
-        )}`;
+        window.location.href = `/game?room=${resp.roomId}&nick=${encodeURIComponent(me)}`;
       }
     );
   }
@@ -117,10 +110,10 @@ export default function HomePage() {
     <div className="page home">
       <h1 className="title">Hold’em&Shot.io</h1>
 
-      <div className="home-card">
-        {/* 서버 상태 표시 – 카드 상단 */}
+      <div className="home-card" role="region" aria-label="Match controls">
+        {/* 서버 상태 표시 */}
         <div className="server-status">
-          <span className={`dot ${serverUp ? "green" : "red"}`} />
+          <span className={`dot ${serverUp ? "green" : "red"}`} aria-hidden />
           <span className="label">
             Server: {serverUp ? "Online" : "Offline"}
           </span>
@@ -129,8 +122,8 @@ export default function HomePage() {
           </button>
         </div>
 
-        {/* 닉네임 + 퀵매치 (가로 배치) */}
-        <div className="row">
+        {/* 닉네임 + 퀵매치 (가로 배치, 겹침 방지) */}
+        <div className="row nowrap">
           <input
             className="input"
             placeholder="Nickname"
@@ -139,18 +132,22 @@ export default function HomePage() {
             maxLength={18}
             autoCapitalize="off"
             autoCorrect="off"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onQuickMatch();
+            }}
           />
           <button
-            className="btn primary"
+            className="btn primary quick-btn"
             onClick={onQuickMatch}
             disabled={busy === "quick"}
             aria-busy={busy === "quick"}
+            aria-label="Quick Match"
           >
             {quickLabel}
           </button>
         </div>
 
-        {/* Create / Join (반반) */}
+        {/* Create / Join */}
         <div className="row two">
           <button
             className="btn ghost"
