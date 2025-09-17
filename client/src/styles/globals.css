@@ -1,3 +1,5 @@
+/* globals.css — Home.tsx 레이아웃/버튼/서버상태 스타일 */
+
 :root{
   --ink:#6e63d3;
   --fg:#2b2463;
@@ -67,7 +69,7 @@ body{
   display:inline-block;
 }
 .server-status .dot.green{ background:#34c759; } /* Online */
-server-status .dot.red{ background:#ff3b30; }   /* Offline */
+.server-status .dot.red{ background:#ff3b30; }   /* Offline */
 .server-status .label{ font-weight:600; }
 .link-btn{
   background:none; border:none;
@@ -98,7 +100,7 @@ server-status .dot.red{ background:#ff3b30; }   /* Offline */
 }
 
 .btn{
-  display:flex;                       /* 텍스트 가운데 정렬 */
+  display:flex;                       /* 텍스트 정확한 중앙 정렬 */
   justify-content:center;
   align-items:center;
   height:56px;
