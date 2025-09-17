@@ -1,13 +1,14 @@
-import { io, Socket } from 'socket.io-client'
+import { io } from 'socket.io-client'
 
-const URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:8080'
+// 🌐 서버 주소
+// Render 서버 주소로 교체하세요 (예: "https://holdem-shot-server.onrender.com")
+// 로컬 테스트 시에는 "http://localhost:8080"
+const SERVER_URL =
+  import.meta.env.VITE_SERVER_URL || 'https://holdem-shot-server.onrender.com'
 
-// Singleton socket
-let socket: Socket | null = null
+const socket = io(SERVER_URL, {
+  transports: ['websocket'], // 안정적인 연결
+  autoConnect: true,
+})
 
-export function getSocket() {
-  if (!socket) {
-    socket = io(URL, { autoConnect: true, transports: ['websocket'] })
-  }
-  return socket
-}
+export default socket
