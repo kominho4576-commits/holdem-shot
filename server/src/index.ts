@@ -1,8 +1,9 @@
 /**
  * Hold’em & Shot – Server bootstrap (FULL)
  * - Express + Socket.IO
- * - CORS: *.vercel.app(프리뷰 포함) / *.onrender.com / localhost 허용 + env 추가 허용
+ * - CORS: *.vercel.app / *.onrender.com / localhost 허용 + env 추가 허용
  * - Quick Match(8s 미매칭 시 AI) / Create & Join Room(6자리)
+ * - Surrender: 즉시 패배 처리 → game:result 방송
  * - 매치 성사 시 'match:started' → 엔진 wire + startRound
  */
 
@@ -80,6 +81,8 @@ let quickQueue: {
 /* =========================
  * Helpers
  * =======================*/
+type Seat = "P1" | "P2";
+
 function makeAIName(): string {
   const pool = [
     "HAL9000",
@@ -126,7 +129,17 @@ function putInRoom(roomId: string, socketId: string) {
   if (s) s.join(roomId);
 }
 
-// 매치 성사 → 클라 통지 + 엔진 시작
+function getSeat(room: Room, socketId: string): Seat | null {
+  if (room.players.length < 1) return null;
+  if (room.players[0]?.id === socketId) return "P1";
+  if (room.players[1]?.id === socketId) return "P2";
+  return null;
+}
+
+function otherSeat(seat: Seat): Seat {
+  return seat === "P1" ? "P2" : "P1";
+}
+
 function startMatch(room: Room) {
   room.stage = "playing";
   clearRoomTimer(room, "aiFallback");
@@ -149,6 +162,15 @@ function startMatch(room: Room) {
   startRound(io, room);
 
   emitRoomUpdate(room.id);
+}
+
+function cleanupRoomLater(roomId: string, ms = 6000) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  room.stage = "ended";
+  setTimeout(() => {
+    rooms.delete(roomId);
+  }, ms);
 }
 
 /* =========================
@@ -310,6 +332,27 @@ io.on("connection", (socket) => {
     emitRoomUpdate(roomId);
 
     if (room.players.length === 2) startMatch(room);
+  });
+
+  // ===== SURRENDER: 즉시 패배 처리 =====
+  socket.on("game:surrender", (payload: { roomId: string }) => {
+    const roomId = (payload?.roomId || "").trim();
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    const mySeat = getSeat(room, socket.id);
+    if (!mySeat) return;
+    const winSeat = otherSeat(mySeat);
+
+    // 결과 방송 (엔진 스테이트와 상관 없이 즉시 종료)
+    io.to(roomId).emit("game:result", {
+      roomId,
+      round: room.round,
+      winnerSeat: winSeat,
+      reason: "surrender",
+    });
+
+    cleanupRoomLater(roomId, 6000);
   });
 
   // 홈 좌하단 서버 버튼 “새로고침”
