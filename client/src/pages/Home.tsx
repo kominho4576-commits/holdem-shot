@@ -1,146 +1,174 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { socket } from "../lib/socket";
+// client/src/pages/Home.tsx
+import { useEffect, useMemo, useState } from "react";
+import { isOnline, onOnlineChange, pingServer, socket } from "../lib/socket";
 
-export default function Home() {
-  const nav = useNavigate();
+const aiNames = [
+  "RoboJoe","Maverick","NeonFox","IvyBot","ZeroNine","DeltaAI",
+  "Helix","Quartz","Nova","Pixel","Orbit","Zephyr",
+];
+function randomAI() {
+  return aiNames[Math.floor(Math.random() * aiNames.length)];
+}
+
+export default function HomePage() {
   const [nickname, setNickname] = useState("");
-  const [showCreate, setShowCreate] = useState(false);
-  const [showJoin, setShowJoin] = useState(false);
-  const [createdCode, setCreatedCode] = useState("");
-  const [joinCode, setJoinCode] = useState("");
+  const [serverUp, setServerUp] = useState(isOnline());
+  const [busy, setBusy] = useState<"quick" | "create" | "join" | null>(null);
 
   useEffect(() => {
-    socket.emit("home:hello", { nickname });
-    const ack = (p: any) => {
-      if (!nickname && p?.nickname) setNickname(p.nickname);
-    };
-    socket.on("home:hello:ack", ack);
-    return () => socket.off("home:hello:ack", ack);
-  }, [nickname]);
-
-  useEffect(() => {
-    const onQueued = () => nav("/match", { replace: true });
-    const onPaired = (p: any) => {
-      if (p?.role) sessionStorage.setItem("seatRole", p.role);
-      nav("/match", { replace: true });
-    };
-    const onStarted = (p: any) => {
-      if (p?.yourSeat) sessionStorage.setItem("mySeat", p.yourSeat);
-      nav("/game", { replace: true, state: p });
-    };
-    socket.on("match:queued", onQueued);
-    socket.on("match:paired", onPaired);
-    socket.on("match:started", onStarted);
-    return () => {
-      socket.off("match:queued", onQueued);
-      socket.off("match:paired", onPaired);
-      socket.off("match:started", onStarted);
-    };
-  }, [nav]);
-
-  useEffect(() => {
-    const onCreated = (p: any) => {
-      setCreatedCode(p.roomId || "");
-      setShowCreate(true);
-    };
-    const onJoinError = (p: any) => alert(p?.message || "Join failed");
-    socket.on("room:created", onCreated);
-    socket.on("room:join:error", onJoinError);
-    return () => {
-      socket.off("room:created", onCreated);
-      socket.off("room:join:error", onJoinError);
-    };
+    const off = onOnlineChange(setServerUp);
+    return () => off();
   }, []);
 
-  const mustName = () => {
-    if (!nickname.trim()) {
-      alert("Enter a nickname first");
-      return false;
+  async function refreshServer() {
+    const ok = await pingServer();
+    setServerUp(ok);
+  }
+
+  // 오프라인 즉시 AI와 시작
+  function startOfflineQuick() {
+    const me = nickname.trim() || "PLAYER";
+    const ai = randomAI();
+    // 라우팅 방식에 맞춰 경로 이동 (Game.tsx에서 mode=offline 처리)
+    window.location.href = `/game?mode=offline&me=${encodeURIComponent(
+      me
+    )}&op=${encodeURIComponent(ai)}`;
+  }
+
+  // 퀵매치: 오프라인이면 AI, 온라인이면 서버 매칭
+  function onQuickMatch() {
+    if (!serverUp) {
+      startOfflineQuick();
+      return;
     }
-    socket.emit("home:hello", { nickname: nickname.trim() });
-    return true;
-  };
+    setBusy("quick");
+    const me = (nickname || "").trim() || "PLAYER";
+    socket.emit(
+      "quick:join",
+      { nickname: me },
+      (resp: { ok: boolean; roomId?: string; error?: string }) => {
+        setBusy(null);
+        if (!resp?.ok || !resp.roomId) {
+          alert(resp?.error ?? "Matching failed. Starting offline vs AI.");
+          startOfflineQuick();
+          return;
+        }
+        window.location.href = `/game?room=${resp.roomId}&nick=${encodeURIComponent(
+          me
+        )}`;
+      }
+    );
+  }
 
-  const handleQuick = () => {
-    if (!mustName()) return;
-    socket.emit("match:quick");
-  };
+  function onCreateRoom() {
+    if (!serverUp) {
+      alert("Offline. Create Room is available only online.");
+      return;
+    }
+    setBusy("create");
+    const me = (nickname || "").trim() || "PLAYER";
+    socket.emit(
+      "room:create",
+      { nickname: me },
+      (resp: { ok: boolean; roomId?: string; error?: string }) => {
+        setBusy(null);
+        if (!resp?.ok || !resp.roomId) {
+          alert(resp?.error ?? "Create room failed.");
+          return;
+        }
+        window.location.href = `/game?room=${resp.roomId}&nick=${encodeURIComponent(
+          me
+        )}`;
+      }
+    );
+  }
 
-  const handleCreate = () => {
-    if (!mustName()) return;
-    socket.emit("room:create");
-  };
-
-  const handleJoinOpen = () => {
-    setShowJoin(true);
-    setJoinCode("");
-  };
-
-  const handleJoinConfirm = () => {
-    const code = joinCode.trim().toUpperCase();
+  function onJoinRoom() {
+    if (!serverUp) {
+      alert("Offline. Join Room is available only online.");
+      return;
+    }
+    const code = prompt("Enter 6-character room code");
     if (!code) return;
-    socket.emit("room:join", { roomId: code });
-  };
+    setBusy("join");
+    const me = (nickname || "").trim() || "PLAYER";
+    socket.emit(
+      "room:join",
+      { code: code.trim().toUpperCase(), nickname: me },
+      (resp: { ok: boolean; roomId?: string; error?: string }) => {
+        setBusy(null);
+        if (!resp?.ok || !resp.roomId) {
+          alert(resp?.error ?? "Join failed.");
+          return;
+        }
+        window.location.href = `/game?room=${resp.roomId}&nick=${encodeURIComponent(
+          me
+        )}`;
+      }
+    );
+  }
+
+  const quickLabel = useMemo(() => {
+    if (!serverUp) return "Quick Match (vs AI)";
+    return busy === "quick" ? "Matching..." : "Quick Match";
+  }, [serverUp, busy]);
 
   return (
     <div className="page home">
-      <div className="title">Hold’em&Shot.io</div>
+      <h1 className="title">Hold’em&Shot.io</h1>
 
-      <div className="card home-card">
-        {/* 모바일에서 버튼 어긋남 방지: 열 폭 자동, 버튼은 고정최대폭 */}
-        <div className="form-grid">
+      <div className="home-card">
+        {/* 서버 상태 표시 – 카드 상단 */}
+        <div className="server-status">
+          <span className={`dot ${serverUp ? "green" : "red"}`} />
+          <span className="label">
+            Server: {serverUp ? "Online" : "Offline"}
+          </span>
+          <button className="link-btn" onClick={refreshServer}>
+            Refresh
+          </button>
+        </div>
+
+        {/* 닉네임 + 퀵매치 (가로 배치) */}
+        <div className="row">
           <input
             className="input"
             placeholder="Nickname"
             value={nickname}
             onChange={(e) => setNickname(e.target.value)}
+            maxLength={18}
+            autoCapitalize="off"
+            autoCorrect="off"
           />
-          <button className="btn btn-solid btn-qm" onClick={handleQuick}>
-            Quick Match
+          <button
+            className="btn primary"
+            onClick={onQuickMatch}
+            disabled={busy === "quick"}
+            aria-busy={busy === "quick"}
+          >
+            {quickLabel}
           </button>
         </div>
 
-        <div className="two-grid">
-          <button className="btn" onClick={handleCreate}>Create Room</button>
-          <button className="btn" onClick={handleJoinOpen}>Join Room</button>
+        {/* Create / Join (반반) */}
+        <div className="row two">
+          <button
+            className="btn ghost"
+            onClick={onCreateRoom}
+            disabled={!serverUp || busy === "create"}
+            title={!serverUp ? "Online only" : undefined}
+          >
+            Create Room
+          </button>
+          <button
+            className="btn ghost"
+            onClick={onJoinRoom}
+            disabled={!serverUp || busy === "join"}
+            title={!serverUp ? "Online only" : undefined}
+          >
+            Join Room
+          </button>
         </div>
-      </div>
-
-      {showCreate && (
-        <Modal onClose={() => setShowCreate(false)}>
-          <div className="modal-title">Room Created</div>
-          <div className="code-big">{createdCode || "------"}</div>
-          <div className="two-grid">
-            <button className="btn" onClick={() => setShowCreate(false)}>Close</button>
-          </div>
-        </Modal>
-      )}
-
-      {showJoin && (
-        <Modal onClose={() => setShowJoin(false)}>
-          <div className="modal-title">Join Room</div>
-          <input
-            className="input"
-            placeholder="Enter Code"
-            value={joinCode}
-            onChange={(e) => setJoinCode(e.target.value)}
-          />
-          <div className="two-grid">
-            <button className="btn" onClick={() => setShowJoin(false)}>Close</button>
-            <button className="btn btn-solid" onClick={handleJoinConfirm}>Confirm</button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-function Modal({ children, onClose }: { children: any; onClose: () => void }) {
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        {children}
       </div>
     </div>
   );
