@@ -3,73 +3,51 @@ import socket from '../lib/socket'
 
 export default function Home({ onEnterGame }: { onEnterGame: () => void }) {
   const [nickname, setNickname] = useState('')
-  const [serverOnline, setServerOnline] = useState(false)
   const [roomCode, setRoomCode] = useState('')
-  const [genCode, setGenCode] = useState<string | null>(null)
-  const [statusMsg, setStatusMsg] = useState<string | null>(null)
+  const [serverOnline, setServerOnline] = useState(false)
 
-  // 서버 상태
   useEffect(() => {
-    socket.on('server_status', (p: { online: boolean }) => setServerOnline(p.online))
+    socket.on('server_status', (s) => setServerOnline(s.online))
     return () => {
       socket.off('server_status')
     }
   }, [])
 
-  // 닉네임 전송
-  const applyNickname = () => {
-    const safe = nickname.trim()
-    if (!safe) return
-    socket.emit('set_nickname', safe)
-  }
-
-  // Quick Match
-  const onQuick = () => {
-    applyNickname()
-    setStatusMsg('Connecting...')
+  const handleQuickMatch = () => {
+    if (nickname.trim()) {
+      socket.emit('set_nickname', nickname)
+    }
     socket.emit('quick_match', {}, (res: any) => {
-      if (res.ok) {
-        setStatusMsg('Matched!')
-        onEnterGame()
-      } else {
-        setStatusMsg('Error matching')
-      }
+      if (res.ok) onEnterGame()
     })
   }
 
-  // Create Room
-  const onCreate = () => {
-    applyNickname()
+  const handleCreateRoom = () => {
+    if (nickname.trim()) {
+      socket.emit('set_nickname', nickname)
+    }
     socket.emit('create_room', {}, (res: any) => {
       if (res.ok) {
-        setGenCode(res.code)
-        setStatusMsg('Room created: ' + res.code)
-        onEnterGame()
-      } else {
-        setStatusMsg('Failed to create room')
+        setRoomCode(res.code)
       }
     })
   }
 
-  // Join Room
-  const onJoin = () => {
-    applyNickname()
-    if (!roomCode.trim()) return
-    socket.emit('join_room', roomCode.trim(), (res: any) => {
-      if (res.ok) {
-        setStatusMsg('Joined room ' + roomCode.trim())
-        onEnterGame()
-      } else {
-        setStatusMsg('Room not found')
-      }
+  const handleJoinRoom = () => {
+    if (nickname.trim()) {
+      socket.emit('set_nickname', nickname)
+    }
+    socket.emit('join_room', roomCode, (res: any) => {
+      if (res.ok) onEnterGame()
+      else alert('Room not found')
     })
   }
 
   return (
     <div className="home-root">
-      <h1 className="title">Hold&apos;em &amp; Shot</h1>
+      <h1>Hold'em & SHOT</h1>
 
-      <div className="nick-row">
+      <div className="input-group">
         <input
           type="text"
           placeholder="Enter nickname"
@@ -78,87 +56,79 @@ export default function Home({ onEnterGame }: { onEnterGame: () => void }) {
         />
       </div>
 
-      <div className="btn-row">
-        <button onClick={onQuick}>Quick Match</button>
-        <button onClick={onCreate}>Create Room</button>
-      </div>
-
-      <div className="join-row">
+      <div className="buttons">
+        <button onClick={handleQuickMatch}>Quick Match</button>
+        <button onClick={handleCreateRoom}>Create Room</button>
         <input
           type="text"
-          placeholder="Enter code"
+          placeholder="Room Code"
           value={roomCode}
-          onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+          onChange={(e) => setRoomCode(e.target.value)}
         />
-        <button onClick={onJoin}>Join Room</button>
+        <button onClick={handleJoinRoom}>Join Room</button>
       </div>
 
-      <div className="server-indicator">
+      <div className="server-status">
         <span
-          className={`dot ${serverOnline ? 'on' : 'off'}`}
-          title={serverOnline ? 'Online' : 'Offline'}
+          className="dot"
+          style={{ background: serverOnline ? 'lime' : 'red' }}
         />
-        <span className="label">{serverOnline ? 'Online' : 'Offline'}</span>
-        <button onClick={() => socket.emit('ping')}>Retry</button>
+        <span>{serverOnline ? 'Online' : 'Offline'}</span>
+        <button onClick={() => window.location.reload()}>Retry</button>
       </div>
-
-      {statusMsg && <div className="status">{statusMsg}</div>}
-
-      {genCode && (
-        <div className="gen-code">
-          Room Code: <b>{genCode}</b>
-        </div>
-      )}
     </div>
   )
 }
 
-/* ---------------- Inline styles (추가 가능) ---------------- */
+/* ---------------- Inline styles ---------------- */
 const style = document.createElement('style')
 style.innerHTML = `
 .home-root {
+  width:100%;
+  height:100dvh;
   display:flex;
   flex-direction:column;
   align-items:center;
   justify-content:center;
-  height:100dvh;
+  background:#111;
+  color:#fff;
+  font-family: system-ui, sans-serif;
+  gap:16px;
+}
+h1 {
+  font-size:28px;
+  margin-bottom:12px;
+}
+.input-group input, .buttons input {
+  padding:8px;
+  border-radius:6px;
+  border:none;
+  margin:4px;
   text-align:center;
-  gap:20px;
 }
-.title {
-  font-size: clamp(28px,6vw,52px);
-  font-weight: 800;
-  color:#6D58F0;
-}
-.nick-row input, .join-row input {
-  padding:10px 14px;
-  border:2px solid #b1a6ff;
-  border-radius:12px;
-  font-size:16px;
-  width: clamp(200px,40vw,280px);
-}
-.btn-row, .join-row {
+.buttons {
   display:flex;
-  gap:10px;
+  flex-direction:column;
+  gap:8px;
 }
-.btn-row button, .join-row button {
+button {
   padding:10px 14px;
-  border:2px solid #b1a6ff;
-  border-radius:12px;
-  background:#f5f3ff;
-  color:#6D58F0;
-  font-weight:700;
-  cursor:pointer;
+  border:none;
+  border-radius:6px;
+  background:#444;
+  color:#fff;
+  font-size:16px;
 }
-.server-indicator {
-  display:flex; align-items:center; gap:10px;
+button:hover { background:#666; }
+.server-status {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-top:12px;
 }
-.server-indicator .dot {
-  width:14px; height:14px; border-radius:50%;
-  background:#ff3b30;
+.dot {
+  width:12px; height:12px;
+  border-radius:50%;
 }
-.server-indicator .dot.on { background:#32d74b; }
-.status { margin-top:10px; color:#6D58F0; font-weight:700; }
-.gen-code { margin-top:10px; font-size:18px; color:#333; }
 `
 document.head.appendChild(style)
