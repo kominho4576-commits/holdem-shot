@@ -1,10 +1,10 @@
 /**
  * matchmaker.ts
  * - QuickMatch/Room 기반의 매칭 관리
- * - index.ts에서 불러다 사용
+ * - index.ts에서 필요 시 불러다 사용할 수 있는 순수 유틸
  */
 
-import type { Room, ServerUser } from "../types.js";
+import type { Room, ServerUser } from "./types.js";  // ✅ 같은 디렉터리
 import { customAlphabet } from "nanoid";
 
 // 0,1,O,I 제외한 6자리 코드
@@ -19,7 +19,7 @@ export let quickQueue: {
 
 // ===== 공용 유틸 =====
 export function generateRoomCode(): string {
-  // 충돌 방지: 드물게 중복 시 재시도
+  // 드물게 중복될 수 있으니 몇 번 재시도
   for (let i = 0; i < 5; i++) {
     const code = nano6();
     if (!rooms.has(code)) return code;
@@ -57,20 +57,18 @@ export function tryMatch(socketId: string, nickname: string) {
     quickQueue.waiting = null;
 
     const roomId = generateRoomCode();
-
     const room: Room = {
       id: roomId,
       createdAt: Date.now(),
       players: [
-        { id: other.socketId, nickname: other.nickname, isAI: false },
-        { id: socketId, nickname, isAI: false },
+        { id: other.socketId, nickname: other.nickname, isAI: false }, // ✅ isAI 추가
+        { id: socketId,      nickname,               isAI: false },     // ✅ isAI 추가
       ],
       stage: "matching",
       round: 1,
-      timers: { aiFallback: null as ReturnType<typeof setTimeout> | null },
+      timers: { aiFallback: null },
       meta: {
         mode: "quick",
-        // 선공 랜덤 배정(필요 시 클라/서버 로직에서 사용)
         firstTurnPlayerId: Math.random() < 0.5 ? other.socketId : socketId,
       },
     };
@@ -82,31 +80,28 @@ export function tryMatch(socketId: string, nickname: string) {
 }
 
 // ===== 코드 방 =====
-
-// 코드 방 생성
 export function createRoom(ownerId: string, nickname: string) {
   const roomId = generateRoomCode();
   const room: Room = {
     id: roomId,
     createdAt: Date.now(),
-    players: [{ id: ownerId, nickname, isAI: false }],
+    players: [{ id: ownerId, nickname, isAI: false }], // ✅ isAI 추가
     stage: "matching",
     round: 1,
-    timers: { aiFallback: null as ReturnType<typeof setTimeout> | null },
-    meta: { mode: "code" }, // code 모드에는 선공 미지정(입장 완료 후 추첨)
+    timers: { aiFallback: null },
+    meta: { mode: "code" },
   };
   rooms.set(roomId, room);
   return room;
 }
 
-// 코드 방 입장
-// 기본은 인간 유저(isAI=false). AI를 넣을 경우 isAI=true로 호출해도 됨.
+// 코드 방 입장 (기본은 사람이므로 isAI=false)
 export function joinRoom(roomId: string, user: ServerUser, isAI = false) {
   const room = rooms.get(roomId);
   if (!room) throw new Error("Room not found");
   if (room.players.length >= 2) throw new Error("Room full");
 
-  room.players.push({ id: user.id, nickname: user.nickname, isAI });
+  room.players.push({ id: user.id, nickname: user.nickname, isAI }); // ✅ isAI 반영
   return room;
 }
 
@@ -117,7 +112,6 @@ export function leaveRoom(roomId: string, userId: string) {
 
   room.players = room.players.filter((p) => p.id !== userId);
 
-  // 남아있는 인원이 없으면 타이머 정리 후 방 제거
   if (room.players.length === 0) {
     if (room.timers.aiFallback) clearTimeout(room.timers.aiFallback);
     rooms.delete(roomId);
@@ -131,4 +125,3 @@ export function findRoomBySocket(socketId: string): Room | undefined {
   }
   return undefined;
 }
-
