@@ -8,7 +8,7 @@
  */
 
 import 'dotenv/config';
-import express from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -127,7 +127,7 @@ function startMatch(room: Room) {
 }
 
 // ---------- Express routes ----------
-app.get('/health', (_req, res) => {
+app.get('/health', (_req: Request, res: Response) => {
   res.json({
     ok: true,
     uptime: process.uptime(),
@@ -136,7 +136,7 @@ app.get('/health', (_req, res) => {
   });
 });
 
-app.get('/status', (_req, res) => {
+app.get('/status', (_req: Request, res: Response) => {
   res.json({
     allowedOrigins: ALLOWED_ORIGINS,
     port: PORT,
@@ -218,10 +218,7 @@ io.on('connection', (socket) => {
       const room: Room = {
         id: roomId,
         createdAt: Date.now(),
-        players: [
-          { id: socket.id, nickname },
-          ai,
-        ],
+        players: [{ id: socket.id, nickname }, ai],
         stage: 'matching',
         round: 1,
         timers: { aiFallback: null },
