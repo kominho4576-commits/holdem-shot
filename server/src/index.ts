@@ -2,6 +2,8 @@
 import express from "express";
 import http from "http";
 import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
 import { Server, Socket } from "socket.io";
 
 import {
@@ -10,7 +12,14 @@ import {
   type Card,
   type Rank,
   type Suit,
-} from "./game/poker7.js"; // ✅ ESM 환경이므로 확장자 포함
+} from "./game/poker7.js";
+
+// ---------- 경로 유틸 (ESM) ----------
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+// 빌드된 클라이언트가 위치할 경로: ../client/dist
+// (server/dist/index.js 기준으로 상대경로 계산)
+const CLIENT_DIST = path.resolve(__dirname, "../../client/dist");
 
 // ---------- 서버 기본 설정 ----------
 const PORT = Number(process.env.PORT || 8080);
@@ -23,6 +32,7 @@ const app = express();
 app.use(
   cors({
     origin: (origin, cb) => {
+      // 같은 오리진/정적서빙으로 오는 요청은 허용
       if (!origin) return cb(null, true);
       if (ALLOWED.length === 0 || ALLOWED.includes(origin)) return cb(null, true);
       return cb(new Error("CORS blocked"), false);
@@ -30,14 +40,27 @@ app.use(
     credentials: true,
   })
 );
+
+// 헬스체크
 app.get("/health", (_req, res) => res.json({ ok: true }));
+
+// ----- 정적 클라이언트 서빙 -----
+app.use(express.static(CLIENT_DIST));
+
+// SPA 라우팅(소켓/io/헬스 제외 모든 경로는 index.html 반환)
+app.get(/^\/(?!health|socket\.io\/).*$/, (req, res) => {
+  res.sendFile(path.join(CLIENT_DIST, "index.html"));
+});
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: ALLOWED.length ? ALLOWED : true, credentials: true },
+  cors: {
+    origin: ALLOWED.length ? ALLOWED : true,
+    credentials: true,
+  },
 });
 
-// ---------- 타입 (이 파일 전용) ----------
+// ---------- 타입 ----------
 type PlayerRef = {
   id: string;
   nickname: string;
@@ -47,7 +70,9 @@ type PlayerRef = {
   ready: boolean;
   surrendered: boolean;
 };
+
 type Phase = "dealing" | "flop" | "turn" | "river" | "showdown" | "roulette";
+
 type Room = {
   code: string;
   players: PlayerRef[];
@@ -232,7 +257,7 @@ io.on("connection", (socket) => {
   socket.on("exchange", ({ code, indices }) => {
     const room = rooms.get(code);
     if (!room) return;
-    if (!["flop", "turn", "river"].includes(room.phase)) return;
+    if (!["flop","turn","river"].includes(room.phase)) return;
     const meIdx = room.players.findIndex((p) => p.id === socket.id);
     if (meIdx < 0) return;
     const expected = room.exchangeStep === 0 ? room.turnIndex : (room.turnIndex === 0 ? 1 : 0);
@@ -283,7 +308,6 @@ io.on("connection", (socket) => {
 function doShowdown(room: Room) {
   room.phase = "showdown";
   emitState(room);
-
   const [A, B] = room.players;
   const evA = evaluate7([...A.hand, ...room.board]);
   const evB = evaluate7([...B.hand, ...room.board]);
