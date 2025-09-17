@@ -10,9 +10,9 @@ import {
   type Card,
   type Rank,
   type Suit,
-} from "./game/poker7.js"; // ✅ ESM 런타임에서 .js 확장자 필요
+} from "./game/poker7.js"; // ✅ ESM 환경이므로 확장자 포함
 
-// ---------- 환경설정 ----------
+// ---------- 서버 기본 설정 ----------
 const PORT = Number(process.env.PORT || 8080);
 const ALLOWED = (process.env.CORS_ORIGIN || "")
   .split(",")
@@ -24,13 +24,13 @@ app.use(
   cors({
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      if (ALLOWED.length === 0 || ALLOWED.includes(origin)) return cb(null, true);
+      if (ALLOWED.length === 0 || ALLOWED.includes(origin))
+        return cb(null, true);
       return cb(new Error("CORS blocked"), false);
     },
     credentials: true,
   })
 );
-
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 const server = http.createServer(app);
@@ -41,7 +41,7 @@ const io = new Server(server, {
   },
 });
 
-// ---------- 유틸 ----------
+// ---------- 타입 ----------
 type PlayerRef = {
   id: string;
   nickname: string;
@@ -50,10 +50,15 @@ type PlayerRef = {
   hand: Card[];
   ready: boolean;
   surrendered: boolean;
-  jokerShieldUsed: boolean;
 };
 
-type Phase = "dealing" | "flop" | "turn" | "river" | "showdown" | "roulette";
+type Phase =
+  | "dealing"
+  | "flop"
+  | "turn"
+  | "river"
+  | "showdown"
+  | "roulette";
 
 type Room = {
   code: string;
@@ -64,13 +69,13 @@ type Room = {
   round: number;
   turnIndex: 0 | 1;
   exchangeStep: 0 | 1;
-  bulletsExtraForLoser: number;
-  loserExempt: boolean;
 };
 
-// 54장(조커 2장 포함)
+// ---------- 카드 유틸 ----------
 function buildDeck(): Card[] {
-  const ranks: Rank[] = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
+  const ranks: Rank[] = [
+    "2","3","4","5","6","7","8","9","10","J","Q","K","A"
+  ];
   const suits: Suit[] = ["S","H","D","C"];
   const deck: Card[] = [];
   for (const s of suits) for (const r of ranks) deck.push({ rank: r, suit: s });
@@ -87,80 +92,60 @@ function shuffle<T>(a: T[]) {
 function code6() {
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
   let s = "";
-  for (let i = 0; i < 6; i++) s += chars[(Math.random() * chars.length) | 0];
+  for (let i = 0; i < 6; i++)
+    s += chars[(Math.random() * chars.length) | 0];
   return s;
 }
 
+// ---------- 상태 ----------
 const rooms = new Map<string, Room>();
 const waiting: { socketId: string; nickname: string }[] = [];
 
-// ---------- 라운드 / 분배 ----------
+// ---------- 라운드 관리 ----------
 function startRound(room: Room) {
   room.phase = "dealing";
   room.deck = buildDeck();
   shuffle(room.deck);
   room.board = [];
-  room.loserExempt = false;
-  room.bulletsExtraForLoser = 0;
   for (const p of room.players) {
     p.hand = [];
     p.ready = false;
     p.surrendered = false;
-    p.jokerShieldUsed = false;
   }
-
-  // 개인 카드 2장 지급(조커 가능)
-  for (let i = 0; i < 2; i++) {
-    for (const p of room.players) {
-      p.hand.push(room.deck.pop()!);
-    }
-  }
-
-  // 커뮤니티 5장 — 반드시 조커 제외
+  // 개인 카드 2장씩
+  for (let i = 0; i < 2; i++)
+    for (const p of room.players) p.hand.push(room.deck.pop()!);
+  // 공유 카드 5장 (조커 제외)
   while (room.board.length < 5 && room.deck.length) {
     const c = room.deck.pop()!;
-    if (c.rank === "JOKER" || c.suit === "X") continue;
+    if (c.rank === "JOKER") continue;
     room.board.push(c);
   }
-
-  // 선순 설정
-  if (room.round === 1) {
-    room.turnIndex = (Math.random() < 0.5 ? 0 : 1);
-  } else {
-    room.turnIndex = (room.turnIndex === 0 ? 1 : 0);
-  }
+  room.turnIndex = Math.random() < 0.5 ? 0 : 1;
   room.exchangeStep = 0;
-
   emitState(room);
   io.to(room.code).emit("phase", { phase: "dealing", round: room.round });
 }
-
-function revealFlopTurnRiver(room: Room, which: "flop"|"turn"|"river") {
+function reveal(room: Room, which: Phase) {
   room.phase = which;
   emitState(room);
   io.to(room.code).emit("phase", { phase: which, round: room.round });
 }
-
-// 교환 처리 (indices: 0~1 중 0~2장)
-function doExchange(room: Room, playerIdx: 0 | 1, indices: number[]) {
-  const p = room.players[playerIdx];
-  const safeIdx = [...new Set(indices.filter((i) => i === 0 || i === 1))].slice(0, 2);
-  for (const i of safeIdx) {
-    p.hand[i] = room.deck.pop()!;
-  }
+function doExchange(room: Room, idx: 0 | 1, indices: number[]) {
+  const p = room.players[idx];
+  const safe = [...new Set(indices.filter((i) => i === 0 || i === 1))].slice(
+    0,
+    2
+  );
+  for (const i of safe) p.hand[i] = room.deck.pop()!;
 }
 
-// ---------- 상태 브로드캐스트 ----------
+// ---------- 브로드캐스트 ----------
 function publicPlayer(p: PlayerRef) {
-  return {
-    id: p.id,
-    nickname: p.nickname || "",
-    isAI: p.isAI,
-    ready: p.ready,
-  };
+  return { id: p.id, nickname: p.nickname, isAI: p.isAI, ready: p.ready };
 }
 function emitState(room: Room) {
-  const payload = {
+  io.to(room.code).emit("state", {
     code: room.code,
     phase: room.phase,
     round: room.round,
@@ -168,13 +153,12 @@ function emitState(room: Room) {
     players: room.players.map(publicPlayer),
     turnIndex: room.turnIndex,
     exchangeStep: room.exchangeStep,
-  };
-  io.to(room.code).emit("state", payload);
+  });
 }
 
 // ---------- 매치메이킹 ----------
-function ensureRoom(code?: string): Room {
-  let c = code || code6();
+function ensureRoom(): Room {
+  let c = code6();
   while (rooms.has(c)) c = code6();
   const room: Room = {
     code: c,
@@ -185,8 +169,6 @@ function ensureRoom(code?: string): Room {
     round: 1,
     turnIndex: 0,
     exchangeStep: 0,
-    bulletsExtraForLoser: 0,
-    loserExempt: false,
   };
   rooms.set(c, room);
   return room;
@@ -198,13 +180,12 @@ function joinRoom(room: Room, socket: Socket, nickname: string, isAI = false) {
   }
   const p: PlayerRef = {
     id: socket.id,
-    nickname: nickname?.trim() || (isAI ? aiName() : `PLAYER${room.players.length+1}`),
+    nickname: nickname || (isAI ? aiName() : `PLAYER${room.players.length+1}`),
     isAI,
     socketId: socket.id,
     hand: [],
     ready: false,
     surrendered: false,
-    jokerShieldUsed: false,
   };
   room.players.push(p);
   socket.join(room.code);
@@ -213,7 +194,7 @@ function joinRoom(room: Room, socket: Socket, nickname: string, isAI = false) {
   return true;
 }
 function aiName() {
-  const pool = ["HAL","MAVERICK","R2D2","KATE","BORG","BOT-77","AYE"];
+  const pool = ["HAL","MAVERICK","R2D2","BORG","BOT77","IVY","KATE"];
   return pool[(Math.random() * pool.length) | 0];
 }
 
@@ -221,23 +202,23 @@ function aiName() {
 io.on("connection", (socket) => {
   socket.emit("hello", { id: socket.id });
 
-  socket.on("createRoom", ({ nickname }: { nickname?: string }) => {
+  socket.on("createRoom", ({ nickname }) => {
     const room = ensureRoom();
     joinRoom(room, socket, nickname || "");
     socket.emit("roomCreated", { code: room.code });
   });
 
-  socket.on("joinRoom", ({ code, nickname }: { code: string; nickname?: string }) => {
+  socket.on("joinRoom", ({ code, nickname }) => {
     const room = rooms.get((code || "").toUpperCase());
     if (!room) return socket.emit("error:room", { message: "Room not found" });
     joinRoom(room, socket, nickname || "");
   });
 
-  socket.on("quickMatch", ({ nickname }: { nickname?: string }) => {
-    const waitingPeer = waiting.shift();
-    if (waitingPeer && waitingPeer.socketId !== socket.id) {
+  socket.on("quickMatch", ({ nickname }) => {
+    const peer = waiting.shift();
+    if (peer && peer.socketId !== socket.id) {
       const room = ensureRoom();
-      const ok1 = joinRoom(room, io.sockets.sockets.get(waitingPeer.socketId)!, waitingPeer.nickname);
+      const ok1 = joinRoom(room, io.sockets.sockets.get(peer.socketId)!, peer.nickname);
       const ok2 = joinRoom(room, socket, nickname || "");
       if (!ok1 || !ok2) return;
       return;
@@ -248,72 +229,59 @@ io.on("connection", (socket) => {
       if (idx !== -1) {
         waiting.splice(idx, 1);
         const room = ensureRoom();
-        const ok1 = joinRoom(room, socket, nickname || "");
-        if (!ok1) return;
-        const aiSocket = socket; // dummy
-        joinRoom(room, aiSocket, aiName(), true);
+        joinRoom(room, socket, nickname || "");
+        const aiSock = socket; // dummy for AI
+        joinRoom(room, aiSock, aiName(), true);
       }
     }, 2000);
   });
 
-  socket.on("ready", ({ code, ready }: { code: string; ready: boolean }) => {
+  socket.on("ready", ({ code }) => {
     const room = rooms.get(code);
     if (!room) return;
     const idx = room.players.findIndex((p) => p.id === socket.id);
     if (idx < 0) return;
-    room.players[idx].ready = !!ready;
+    room.players[idx].ready = true;
     emitState(room);
     if (room.players.length === 2 && room.players.every((p) => p.ready)) {
-      revealFlopTurnRiver(room, "flop");
+      reveal(room, "flop");
     }
   });
 
-  socket.on("exchange", ({ code, indices }: { code: string; indices: number[] }) => {
+  socket.on("exchange", ({ code, indices }) => {
     const room = rooms.get(code);
     if (!room) return;
-    if (!["flop", "turn", "river"].includes(room.phase)) return;
-
+    if (!["flop","turn","river"].includes(room.phase)) return;
     const meIdx = room.players.findIndex((p) => p.id === socket.id);
     if (meIdx < 0) return;
-
-    const expectedIdx = (room.exchangeStep === 0 ? room.turnIndex : (room.turnIndex === 0 ? 1 : 0)) as 0|1;
-    if (meIdx !== expectedIdx) return;
-
-    doExchange(room, meIdx as 0|1, indices || []);
+    const expected =
+      room.exchangeStep === 0 ? room.turnIndex : (room.turnIndex === 0 ? 1 : 0);
+    if (meIdx !== expected) return;
+    doExchange(room, meIdx as 0 | 1, indices || []);
     emitState(room);
-
     if (room.exchangeStep === 0) {
       room.exchangeStep = 1;
-      emitState(room);
-      return;
-    }
-    room.exchangeStep = 0;
-    if (room.phase === "flop") {
-      revealFlopTurnRiver(room, "turn");
-    } else if (room.phase === "turn") {
-      revealFlopTurnRiver(room, "river");
-    } else if (room.phase === "river") {
-      doShowdown(room);
+    } else {
+      room.exchangeStep = 0;
+      if (room.phase === "flop") reveal(room, "turn");
+      else if (room.phase === "turn") reveal(room, "river");
+      else if (room.phase === "river") doShowdown(room);
     }
   });
 
-  socket.on("surrender", ({ code }: { code: string }) => {
+  socket.on("surrender", ({ code }) => {
     const room = rooms.get(code);
     if (!room) return;
     const meIdx = room.players.findIndex((p) => p.id === socket.id);
     if (meIdx < 0) return;
-
     room.players[meIdx].surrendered = true;
     const winnerIdx = (meIdx === 0 ? 1 : 0) as 0 | 1;
     io.to(room.code).emit("round:result", {
       round: room.round,
       winner: winnerIdx,
       reason: "Surrender",
-      summary: "",
-      my: {},
-      opp: {},
     });
-    startRoulette(room, meIdx as 0|1, false, 0);
+    startRoulette(room, meIdx as 0 | 1);
   });
 
   socket.on("disconnect", () => {
@@ -335,125 +303,67 @@ io.on("connection", (socket) => {
 function doShowdown(room: Room) {
   room.phase = "showdown";
   emitState(room);
-
-  const A = room.players[0];
-  const B = room.players[1];
-
+  const [A, B] = room.players;
   const evA = evaluate7([...A.hand, ...room.board]);
   const evB = evaluate7([...B.hand, ...room.board]);
-
   let winner: 0 | 1 | -1 = -1;
-  const cmp =
-    evA.category !== evB.category
-      ? evA.category - evB.category
-      : (() => {
-          const aa = evA.tiebreak;
-          const bb = evB.tiebreak;
-          for (let i = 0; i < Math.max(aa.length, bb.length); i++) {
-            const d = (aa[i] ?? 0) - (bb[i] ?? 0);
-            if (d) return d;
-          }
-          return 0;
-        })();
-
+  const cmp = evA.category !== evB.category
+    ? evA.category - evB.category
+    : (() => {
+        for (let i = 0; i < Math.max(evA.tiebreak.length, evB.tiebreak.length); i++) {
+          const d = (evA.tiebreak[i] ?? 0) - (evB.tiebreak[i] ?? 0);
+          if (d) return d;
+        }
+        return 0;
+      })();
   if (cmp > 0) winner = 0;
   else if (cmp < 0) winner = 1;
   else winner = -1;
-
-  io.to(room.code).emit("round:result", {
-    round: room.round,
-    winner,
-    reason: "Showdown",
-    summary:
-      winner === -1
-        ? "Tie"
-        : winner === 0
-        ? describeBestHand(evA, evB)
-        : describeBestHand(evB, evA),
-    my: { a: evA, b: evB }
-  });
-
-  if (winner === -1) {
-    proceedNextRound(room);
-    return;
-  }
+  io.to(room.code).emit("round:result", { round: room.round, winner });
+  if (winner === -1) return proceedNextRound(room);
   const loser = winner === 0 ? 1 : 0;
-
-  const loserHasJoker = room.players[loser].hand.some(
-    (c) => c.rank === "JOKER" || c.suit === "X"
-  );
-  const winnerHasJoker = room.players[winner].hand.some(
-    (c) => c.rank === "JOKER" || c.suit === "X"
-  );
-
-  const exempt = loserHasJoker;
-  const extra = winnerHasJoker ? 1 : 0;
-
-  startRoulette(room, loser as 0|1, exempt, extra);
+  startRoulette(room, loser as 0 | 1);
 }
-
-function startRoulette(room: Room, loserIdx: 0 | 1, exempt: boolean, extraBullets: number) {
+function startRoulette(room: Room, loserIdx: 0 | 1) {
   room.phase = "roulette";
   emitState(room);
-
-  const baseBullets = Math.min(room.round, 6);
-  const bullets = Math.min(baseBullets + (extraBullets || 0), 6);
-
-  if (exempt) {
-    io.to(room.code).emit("roulette:start", {
-      bullets,
-      exempt: true,
-      chambers: 6,
-      bulletSlots: []
-    });
-    setTimeout(() => proceedNextRound(room), 1000);
-    return;
-  }
-
+  const bullets = Math.min(room.round, 6);
   const slots = new Set<number>();
   while (slots.size < bullets) slots.add((Math.random() * 6) | 0);
-  const bulletSlots = [...slots].sort((a,b)=>a-b);
-
+  const bulletSlots = [...slots];
   const startPos = (Math.random() * 6) | 0;
-  const spins = 2 + ((Math.random() * 4) | 0);
   const stopPos = (Math.random() * 6) | 0;
-
+  const spins = 2 + ((Math.random() * 4) | 0);
   io.to(room.code).emit("roulette:start", {
     bullets,
-    exempt: false,
     chambers: 6,
     bulletSlots,
     startPos,
     spins,
-    stopPos
+    stopPos,
   });
-
   setTimeout(() => {
     const bang = bulletSlots.includes(stopPos);
-    io.to(room.code).emit("roulette:result", {
-      bang,
-      loser: loserIdx
-    });
+    io.to(room.code).emit("roulette:result", { bang, loser: loserIdx });
     setTimeout(() => {
       if (bang) {
         io.to(room.code).emit("game:end", {
           winner: loserIdx === 0 ? 1 : 0,
-          loser: loserIdx
+          loser: loserIdx,
         });
         rooms.delete(room.code);
       } else {
         proceedNextRound(room);
       }
     }, 1000);
-  }, 5000);
+  }, 4800);
 }
-
 function proceedNextRound(room: Room) {
   room.round += 1;
   startRound(room);
 }
 
-// ---------- 서버 시작 ----------
+// ---------- 서버 실행 ----------
 server.listen(PORT, () => {
   console.log("holdem-shot server on :", PORT);
 });
