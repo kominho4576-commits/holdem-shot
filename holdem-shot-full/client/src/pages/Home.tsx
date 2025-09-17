@@ -1,117 +1,164 @@
-import { useEffect, useState } from 'react'
-import { getSocket } from '../lib/socket'
-import { useStore } from '../state/store'
-import ServerIndicator from '../components/ServerIndicator'
+import React, { useState, useEffect } from 'react'
+import socket from '../lib/socket'
 
-function sixCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  let s = ''
-  for (let i=0;i<6;i++) s += chars[Math.floor(Math.random()*chars.length)]
-  return s
-}
+export default function Home({ onEnterGame }: { onEnterGame: () => void }) {
+  const [nickname, setNickname] = useState('')
+  const [serverOnline, setServerOnline] = useState(false)
+  const [roomCode, setRoomCode] = useState('')
+  const [genCode, setGenCode] = useState<string | null>(null)
+  const [statusMsg, setStatusMsg] = useState<string | null>(null)
 
-export default function Home() {
-  const [joinCode, setJoinCode] = useState('')
-  const [createdCode, setCreatedCode] = useState('')
-  const [connecting, setConnecting] = useState(false)
-
-  const nickname = useStore(s=>s.nickname)
-  const setNickname = useStore(s=>s.setNickname)
-  const setRoute = useStore(s=>s.setRoute)
-  const setGame = useStore(s=>s.setGame)
-  const setServerOnline = useStore(s=>s.setServerOnline)
-
-  // 저장된 닉네임 로드
-  useEffect(()=>{
-    const saved = localStorage.getItem('hs_nick') || ''
-    if (saved) {
-      setNickname(saved)
-      getSocket().emit('set_nickname', saved)
+  // 서버 상태
+  useEffect(() => {
+    socket.on('server_status', (p: { online: boolean }) => setServerOnline(p.online))
+    return () => {
+      socket.off('server_status')
     }
-  }, [setNickname])
+  }, [])
 
-  useEffect(()=>{
-    const sock = getSocket()
-    const onConnect = () => {
-      useStore.getState().setMyId(sock.id)
-      setServerOnline(true)
-      // 접속 시점에 닉네임 다시 전송 (모바일 사파리에서 blur 누락 방지)
-      const name = (useStore.getState().nickname || '').trim()
-      sock.emit('set_nickname', name)
-    }
-    const onDisconnect = () => setServerOnline(false)
-    const onState = (payload:any) => { setGame(payload); setRoute('game') }
-    const onServer = (p:any) => setServerOnline(!!p?.online)
-
-    sock.on('connect', onConnect)
-    sock.on('disconnect', onDisconnect)
-    sock.on('state', onState)
-    sock.on('server_status', onServer)
-    if (sock.connected) onConnect()
-    return ()=>{ sock.off('connect', onConnect); sock.off('disconnect', onDisconnect); sock.off('state', onState); sock.off('server_status', onServer) }
-  }, [setGame, setRoute, setServerOnline])
-
-  const applyName = (value: string) => {
-    const name = value.trim().slice(0,16)
-    setNickname(name)
-    localStorage.setItem('hs_nick', name)
-    getSocket().emit('set_nickname', name)
+  // 닉네임 전송
+  const applyNickname = () => {
+    const safe = nickname.trim()
+    if (!safe) return
+    socket.emit('set_nickname', safe)
   }
 
-  const quickMatch = () => {
-    applyName(nickname)
-    setConnecting(true)
-    setRoute('match')
-    getSocket().emit('quick_match', {}, () => {})
-  }
-
-  const createRoom = () => {
-    applyName(nickname)
-    const code = sixCode()
-    getSocket().emit('create_room', {}, (res:any)=>{
-      const c = res?.code || code
-      setCreatedCode(c)
+  // Quick Match
+  const onQuick = () => {
+    applyNickname()
+    setStatusMsg('Connecting...')
+    socket.emit('quick_match', {}, (res: any) => {
+      if (res.ok) {
+        setStatusMsg('Matched!')
+        onEnterGame()
+      } else {
+        setStatusMsg('Error matching')
+      }
     })
   }
 
-  const joinRoom = () => {
-    if (!joinCode) return
-    applyName(nickname)
-    getSocket().emit('join_room', joinCode.trim().toUpperCase(), (res:any)=>{
-      if (!res?.ok) alert('Room not found')
+  // Create Room
+  const onCreate = () => {
+    applyNickname()
+    socket.emit('create_room', {}, (res: any) => {
+      if (res.ok) {
+        setGenCode(res.code)
+        setStatusMsg('Room created: ' + res.code)
+        onEnterGame()
+      } else {
+        setStatusMsg('Failed to create room')
+      }
     })
-    setRoute('match')
+  }
+
+  // Join Room
+  const onJoin = () => {
+    applyNickname()
+    if (!roomCode.trim()) return
+    socket.emit('join_room', roomCode.trim(), (res: any) => {
+      if (res.ok) {
+        setStatusMsg('Joined room ' + roomCode.trim())
+        onEnterGame()
+      } else {
+        setStatusMsg('Room not found')
+      }
+    })
   }
 
   return (
-    <div className="screen center-col">
-      <h1 className="title">Hold’em&Shot.io</h1>
+    <div className="home-root">
+      <h1 className="title">Hold&apos;em &amp; Shot</h1>
 
-      <div className="panel">
-        <div className="row">
-          <input
-            className="input"
-            placeholder="Nickname"
-            value={nickname}
-            onChange={e=>applyName(e.target.value)}
-            maxLength={16}
-          />
-          <button className="btn" onClick={quickMatch} disabled={connecting}>Quick Match</button>
-        </div>
-
-        <div className="row">
-          <button className="btn" onClick={createRoom}>Create Room</button>
-          <input className="input" placeholder={createdCode ? createdCode : ''} value={createdCode} readOnly />
-        </div>
-
-        <div className="row">
-          <input className="input" placeholder="Enter Room Code" value={joinCode} onChange={e=>setJoinCode(e.target.value)} />
-          <button className="btn" onClick={joinRoom}>Join Room</button>
-        </div>
+      <div className="nick-row">
+        <input
+          type="text"
+          placeholder="Enter nickname"
+          value={nickname}
+          onChange={(e) => setNickname(e.target.value)}
+        />
       </div>
 
-      <ServerIndicator />
-      <div className="orientation-hint">Rotate to landscape</div>
+      <div className="btn-row">
+        <button onClick={onQuick}>Quick Match</button>
+        <button onClick={onCreate}>Create Room</button>
+      </div>
+
+      <div className="join-row">
+        <input
+          type="text"
+          placeholder="Enter code"
+          value={roomCode}
+          onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+        />
+        <button onClick={onJoin}>Join Room</button>
+      </div>
+
+      <div className="server-indicator">
+        <span
+          className={`dot ${serverOnline ? 'on' : 'off'}`}
+          title={serverOnline ? 'Online' : 'Offline'}
+        />
+        <span className="label">{serverOnline ? 'Online' : 'Offline'}</span>
+        <button onClick={() => socket.emit('ping')}>Retry</button>
+      </div>
+
+      {statusMsg && <div className="status">{statusMsg}</div>}
+
+      {genCode && (
+        <div className="gen-code">
+          Room Code: <b>{genCode}</b>
+        </div>
+      )}
     </div>
   )
 }
+
+/* ---------------- Inline styles (추가 가능) ---------------- */
+const style = document.createElement('style')
+style.innerHTML = `
+.home-root {
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  height:100dvh;
+  text-align:center;
+  gap:20px;
+}
+.title {
+  font-size: clamp(28px,6vw,52px);
+  font-weight: 800;
+  color:#6D58F0;
+}
+.nick-row input, .join-row input {
+  padding:10px 14px;
+  border:2px solid #b1a6ff;
+  border-radius:12px;
+  font-size:16px;
+  width: clamp(200px,40vw,280px);
+}
+.btn-row, .join-row {
+  display:flex;
+  gap:10px;
+}
+.btn-row button, .join-row button {
+  padding:10px 14px;
+  border:2px solid #b1a6ff;
+  border-radius:12px;
+  background:#f5f3ff;
+  color:#6D58F0;
+  font-weight:700;
+  cursor:pointer;
+}
+.server-indicator {
+  display:flex; align-items:center; gap:10px;
+}
+.server-indicator .dot {
+  width:14px; height:14px; border-radius:50%;
+  background:#ff3b30;
+}
+.server-indicator .dot.on { background:#32d74b; }
+.status { margin-top:10px; color:#6D58F0; font-weight:700; }
+.gen-code { margin-top:10px; font-size:18px; color:#333; }
+`
+document.head.appendChild(style)
