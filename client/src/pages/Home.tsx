@@ -3,15 +3,10 @@ import { useNavigate } from "react-router-dom";
 import ServerPill from "../components/ServerPill";
 import { socket } from "../lib/socket";
 
-function six() {
-  const ABC = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  return Array.from({length:6}, ()=> ABC[Math.floor(Math.random()*ABC.length)]).join("");
-}
-
 export default function Home() {
   const nav = useNavigate();
   const [nickname, setNickname] = useState("");
-  const [createCode, setCreateCode] = useState("");
+  const [createdCode, setCreatedCode] = useState("");  // 서버가 준 코드만 표시
   const [joinCode, setJoinCode] = useState("");
   const once = useRef(false);
 
@@ -20,20 +15,29 @@ export default function Home() {
     if (once.current) return;
     once.current = true;
     socket.emit("home:hello", { nickname });
-    socket.on("home:hello:ack", () => {});
-    return () => {
-      socket.off("home:hello:ack");
-    };
   }, []);
 
-  // 방 입장/매칭 이벤트
+  // 방/매치 이벤트 → 즉시 네비게이트
   useEffect(() => {
     const toMatch = () => nav("/match", { replace: true });
+    const toGame = (p:any) => nav("/game", { replace: true, state: p });
+
     socket.on("match:queued", toMatch);
     socket.on("match:paired", toMatch);
+    socket.on("room:joined", toMatch);       // 코드 매치에서 대기 화면으로
+    socket.on("match:started", toGame);      // 바로 게임으로
+
+    // 코드 생성 결과
+    socket.on("room:created", (p:{roomId:string}) => setCreatedCode(p.roomId));
+    socket.on("room:join:error", (e) => alert(e.message || "Join failed"));
+
     return () => {
       socket.off("match:queued", toMatch);
       socket.off("match:paired", toMatch);
+      socket.off("room:joined", toMatch);
+      socket.off("match:started", toGame);
+      socket.off("room:created");
+      socket.off("room:join:error");
     };
   }, [nav]);
 
@@ -45,10 +49,9 @@ export default function Home() {
 
   function onCreateRoom() {
     const nick = nickname.trim().length ? nickname.trim() : "PLAYER1";
+    setCreatedCode("..."); // 서버 응답 대기
     socket.emit("home:hello", { nickname: nick });
     socket.emit("room:create");
-    // 서버에서 코드 알려주지만, 스케치처럼 오른쪽 빈칸에 미리 보여주기 위해 프론트에서도 생성 표시
-    setCreateCode(six());
   }
 
   function onJoinRoom() {
@@ -59,45 +62,29 @@ export default function Home() {
     socket.emit("room:join", { roomId: code });
   }
 
-  // 서버에서 실제 생성된 코드 반영
-  useEffect(() => {
-    const onCreated = (p: { roomId: string }) => setCreateCode(p.roomId);
-    socket.on("room:created", onCreated);
-    socket.on("room:join:error", (e) => alert(e.message || "Join failed"));
-    return () => {
-      socket.off("room:created", onCreated);
-      socket.off("room:join:error");
-    };
-  }, []);
-
   return (
     <div className="center-col">
       <div className="h1">Hold’em&Shot.io</div>
 
-      <div className="card">
-        <div className="row">
-          <input
-            className="input"
-            placeholder="Nickname"
-            value={nickname}
-            onChange={(e)=>setNickname(e.target.value)}
-          />
-          <button className="btn" onClick={onQuick}>Quick Match</button>
+      <div className="card card-home">
+        {/* Row1 */}
+        <div className="row wrap">
+          <input className="input grow" placeholder="Nickname" value={nickname}
+                 onChange={(e)=>setNickname(e.target.value)} />
+          <button className="btn btn-big" onClick={onQuick}>Quick Match</button>
         </div>
 
-        <div className="row">
-          <button className="btn" onClick={onCreateRoom}>Create Room</button>
-          <div className="input codebox" aria-label="room-code">{createCode}</div>
+        {/* Row2 */}
+        <div className="row wrap">
+          <button className="btn btn-big" onClick={onCreateRoom}>Create Room</button>
+          <div className="input codebox fixed" aria-label="room-code">{createdCode}</div>
         </div>
 
-        <div className="row">
-          <input
-            className="input"
-            placeholder="Enter Code"
-            value={joinCode}
-            onChange={(e)=>setJoinCode(e.target.value.toUpperCase())}
-          />
-          <button className="btn" onClick={onJoinRoom}>Join Room</button>
+        {/* Row3 */}
+        <div className="row wrap">
+          <input className="input grow" placeholder="Enter Code"
+                 value={joinCode} onChange={(e)=>setJoinCode(e.target.value.toUpperCase())}/>
+          <button className="btn btn-big" onClick={onJoinRoom}>Join Room</button>
         </div>
       </div>
 
