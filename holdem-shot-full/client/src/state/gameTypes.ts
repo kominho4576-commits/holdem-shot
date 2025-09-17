@@ -16,6 +16,8 @@ export type GameStatePayload = {
   board: string[]
   players: Record<string, PlayerView>
   isAI: boolean
+  /** 서버에서 보내주면 사용. 없으면 ready 상태로 추론 */
+  activeId?: string
 }
 
 export type ComparePayload = {
@@ -28,7 +30,7 @@ export type ComparePayload = {
 export type RoulettePayload = {
   round: number
   chambers: number[]   // 6 length; 1 = bullet, 0 = empty
-  top: number          // index 0..5 that lands at arrow
+  top: number          // index 0..5
   rotatedSteps: number
   skipped: boolean
   text: 'SAFE'|'BANG!'
