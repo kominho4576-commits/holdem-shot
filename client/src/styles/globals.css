@@ -47,6 +47,17 @@ body{
 .big{ font-size:36px; font-weight:800; }
 .sub{ font-size:18px; opacity:0.9 }
 
+/* --- names bar --- */
+.namesbar{
+  width:100%; max-width:420px;
+  display:flex; align-items:center; justify-content:space-between;
+}
+.namepill{ display:flex; align-items:center; gap:8px; font-weight:800; }
+.namepill.right{ flex-direction:row; }
+.dot-sm{ width:10px; height:10px; border-radius:50%; background:#d0d0d0; border:1px solid var(--ink); }
+.dot-sm.on{ background:#2ecc71; }
+
+/* --- cards layout --- */
 .card-row, .mine, .opp{
   gap:10px; flex-wrap:wrap; justify-content:center;
 }
@@ -59,3 +70,8 @@ body{
   .h1{ font-size:44px; }
   .codebox.fixed{ width:220px; }
 }
+.spinner {
+  width:54px; height:54px; border:3px solid rgba(110,99,211,0.25); border-top-color: var(--ink);
+  border-radius:50%; animation: spin 1s linear infinite; margin: 12px auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
