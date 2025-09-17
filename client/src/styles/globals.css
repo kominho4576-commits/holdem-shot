@@ -1,5 +1,3 @@
-/* globals.css — Home.tsx가 기대하는 레이아웃/버튼/서버상태 스타일 포함 */
-
 :root{
   --ink:#6e63d3;
   --fg:#2b2463;
@@ -15,6 +13,7 @@ body{
                "Helvetica Neue", Arial, "Apple SD Gothic Neo", sans-serif;
   color:var(--fg);
   background:var(--bg);
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* ===== 공통 페이지 레이아웃 ===== */
@@ -25,8 +24,8 @@ body{
   align-items:center;
 }
 .page.home{
-  justify-content:space-between;      /* 화면 전체를 고르게 사용 */
-  padding:48px 16px 64px;             /* 상/좌우/하 여백 */
+  justify-content:space-between;
+  padding:48px 16px 64px;
 }
 
 /* ===== 제목 ===== */
@@ -36,6 +35,7 @@ body{
   color:var(--ink);
   margin:24px 0;
   text-align:center;
+  user-select:none;
 }
 
 /* ===== 홈 카드(입력/버튼 영역) — 화면 하단 고정 ===== */
@@ -50,6 +50,7 @@ body{
   left:50%;
   bottom:32px;
   transform:translateX(-50%);
+  z-index:10;                     /* 하단 브라우저 UI/오버레이 위로 */
 }
 
 /* ===== 서버 상태 표시줄 ===== */
@@ -80,17 +81,19 @@ body{
   align-items:center;
   gap:12px;
 }
+.row.nowrap{ flex-wrap:nowrap; }      /* 퀵매치 줄바꿈 방지 */
 .row + .row{ margin-top:12px; }
-.row.two > *{ flex:1; } /* Create / Join 반반 배치 */
+.row.two > *{ flex:1; }               /* Create / Join 반반 배치 */
 
 /* ===== 입력/버튼 ===== */
 .input{
+  min-width:0;                        /* flex 항목 수축 허용 → 버튼과 겹침 방지 */
   flex:1;
   height:56px;
   padding:0 16px;
   border:2px solid var(--ink);
   border-radius:18px;
-  font-size:18px;
+  font-size:18px;                     /* iOS 키보드 확대 방지 */
   outline:none;
 }
 
@@ -104,7 +107,28 @@ body{
   color:var(--ink);
   background:#fff;
   cursor:pointer;
+  line-height:1.05;
+  white-space:nowrap;                 /* 버튼 텍스트 줄바꿈 방지 */
 }
 .btn[disabled]{ opacity:.5; cursor:not-allowed; }
 .btn.primary{ background:var(--ink); color:#fff; }
 .btn.ghost{ background:#fff; }
+
+/* 퀵매치 버튼: 고정 최소폭으로 입력칸이 자동 축소되도록 */
+.quick-btn{
+  flex:0 0 132px;                     /* 고정 폭 확보 */
+  min-width:120px;
+}
+
+/* 초소형 기기 대응 */
+@media (max-width: 360px){
+  .quick-btn{ flex-basis:118px; min-width:110px; }
+}
+
+/* 안전여백(노치) 대응 */
+@supports (padding: env(safe-area-inset-bottom)){
+  .home-card{
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+    bottom: max(16px, env(safe-area-inset-bottom));
+  }
+}
