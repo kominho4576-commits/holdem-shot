@@ -27,35 +27,27 @@ const RVAL: Record<string, number> = {
 };
 
 function clone<T>(x: T): T { return JSON.parse(JSON.stringify(x)); }
-
-/** 카드 정규화(대문자 처리 등) */
-function norm(c: Card): Card {
-  return { rank: c.rank, suit: c.suit };
-}
-
 function byDesc(a: number, b: number) { return b - a; }
 
 /** 5장 족보 평가 */
 function evaluate5(cards: Card[]): HandEval {
-  const hand = cards.map(norm);
-  const vals = hand.map(c => RVAL[c.rank]).sort(byDesc);
+  const vals = cards.map(c => RVAL[c.rank]).sort(byDesc);
 
   // 랭크 카운트
-  const count: Record<number, number> = {};
-  for (const v of vals) count[v] = (count[v] || 0) + 1;
+  const cnt: Record<number, number> = {};
+  for (const v of vals) cnt[v] = (cnt[v] || 0) + 1;
 
   // 수트 카운트
-  const suitCount: Record<Suit, number> = { S:0, H:0, D:0, C:0, X:0 };
-  for (const c of hand) suitCount[c.suit] = (suitCount[c.suit] || 0) + 1;
+  const suitCnt: Record<string, number> = {};
+  for (const c of cards) suitCnt[c.suit] = (suitCnt[c.suit] || 0) + 1;
 
   // Flush?
-  const flushSuit = (["S","H","D","C"] as Suit[]).find(s => suitCount[s] === 5);
+  const flushSuit = (["S","H","D","C"] as Suit[]).find(s => suitCnt[s] === 5);
 
   // Straight? (A-5 wheel 처리)
   const uniq = [...new Set(vals)].filter(v => v > 0).sort(byDesc);
   let straightHigh = 0;
   if (uniq.length >= 5 && uniq[0] - uniq[4] === 4) straightHigh = uniq[0];
-  // wheel (A,5,4,3,2)
   if (!straightHigh && uniq.includes(14)) {
     const wheel = [5,4,3,2,14];
     if (wheel.every(v => uniq.includes(v))) straightHigh = 5;
@@ -64,7 +56,7 @@ function evaluate5(cards: Card[]): HandEval {
   // Straight Flush?
   let isSF = false;
   if (flushSuit && straightHigh) {
-    const flushVals = hand
+    const flushVals = cards
       .filter(c => c.suit === flushSuit)
       .map(c => RVAL[c.rank])
       .sort(byDesc);
@@ -77,9 +69,9 @@ function evaluate5(cards: Card[]): HandEval {
   }
 
   // rank pattern
-  const groups = Object.entries(count)
+  const groups = Object.entries(cnt)
     .map(([v, n]) => ({ v: +v, n }))
-    .sort((a, b) => b.n - a.n || b.v - a.v); // 우선 카운트, 다음 값
+    .sort((a, b) => b.n - a.n || b.v - a.v);
 
   let category = 0;
   let tiebreak: number[] = [];
@@ -153,14 +145,10 @@ function humanName(cat: number, tb: number[]): string {
 
 /**
  * 7장 중 최적 5장 평가 (조커는 제외)
- * @param seven 7장(개인2+커뮤니티5) – 조커(rank:'JOKER' 또는 suit:'X')는 자동 제외
  */
 export function evaluate7(seven: Card[]): HandEval {
   const pool = seven.filter(c => c.rank !== "JOKER" && c.suit !== "X");
-  if (pool.length < 5) {
-    // 조커만 많아서 5장 미만인 극단 상황 → 가능한 카드로 High Card 취급
-    return evaluate5(pool);
-  }
+  if (pool.length < 5) return evaluate5(pool);
 
   // 조합 21개 모두 평가
   let best: HandEval | null = null;
@@ -184,10 +172,9 @@ export function compare(a: HandEval, b: HandEval): number {
     const bv = b.tiebreak[i] ?? 0;
     if (av !== bv) return av - bv;
   }
-  return 0; // 완전 동일
+  return 0;
 }
 
-/** 사람이 읽을 비교 설명 */
 export function describeBestHand(my: HandEval, opp: HandEval): string {
   if (compare(my, opp) > 0) return `You win: ${my.name} vs ${opp.name}`;
   if (compare(my, opp) < 0) return `You lose: ${my.name} vs ${opp.name}`;
