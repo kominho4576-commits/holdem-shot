@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react'
 import socket from './lib/socket'
 import Home from './pages/Home'
+import Match from './pages/Match'
 import Game from './pages/Game'
+import Result from './pages/Result'
+
+type Screen = 'home' | 'match' | 'game' | 'result'
 
 export default function App() {
-  const [inGame, setInGame] = useState(false)
+  const [screen, setScreen] = useState<Screen>('home')
   const [connected, setConnected] = useState(false)
 
-  // 소켓 연결 상태 감지
   useEffect(() => {
     socket.on('connect', () => {
       console.log('✅ Connected to server:', socket.id)
@@ -18,19 +21,24 @@ export default function App() {
       setConnected(false)
     })
 
+    // 서버에서 결과 이벤트 받으면 결과 화면으로 이동
+    socket.on('result', () => {
+      setScreen('result')
+    })
+
     return () => {
       socket.off('connect')
       socket.off('disconnect')
+      socket.off('result')
     }
   }, [])
 
   return (
     <div className="app-root">
-      {!inGame ? (
-        <Home onEnterGame={() => setInGame(true)} />
-      ) : (
-        <Game onExitGame={() => setInGame(false)} />
-      )}
+      {screen === 'home' && <Home onEnterGame={() => setScreen('match')} />}
+      {screen === 'match' && <Match onEnterGame={() => setScreen('game')} />}
+      {screen === 'game' && <Game onExitGame={() => setScreen('home')} />}
+      {screen === 'result' && <Result onExitGame={() => setScreen('home')} />}
 
       {!connected && (
         <div className="overlay">
