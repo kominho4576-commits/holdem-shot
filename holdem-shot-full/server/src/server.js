@@ -16,8 +16,30 @@ import { Server } from 'socket.io'
 const app = express()
 app.use(express.json())
 
-const ORIGIN = process.env.CORS_ORIGIN || '*'
-app.use(cors({ origin: ORIGIN }))
+// 허용할 도메인 배열
+const allowedOrigins = [
+  "https://holdem-shot.vercel.app", // Vercel 프론트엔드
+  "http://localhost:5173"           // 로컬 개발용
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true); // 모바일 앱/테스트 환경에서 origin 없을 수 있음
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error("CORS not allowed"), false);
+  }
+}));
+
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: allowedOrigins,
+    methods: ["GET", "POST"]
+  }
+});
+
 
 app.get('/health', (_req, res) =>
   res.json({ ok: true, time: Date.now(), origin: ORIGIN })
