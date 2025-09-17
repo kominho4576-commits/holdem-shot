@@ -50,7 +50,7 @@ body{
   left:50%;
   bottom:32px;
   transform:translateX(-50%);
-  z-index:10;                     /* 하단 브라우저 UI/오버레이 위로 */
+  z-index:10; /* 오버레이 위 */
 }
 
 /* ===== 서버 상태 표시줄 ===== */
@@ -67,7 +67,7 @@ body{
   display:inline-block;
 }
 .server-status .dot.green{ background:#34c759; } /* Online */
-.server-status .dot.red{ background:#ff3b30; }   /* Offline */
+server-status .dot.red{ background:#ff3b30; }   /* Offline */
 .server-status .label{ font-weight:600; }
 .link-btn{
   background:none; border:none;
@@ -93,11 +93,14 @@ body{
   padding:0 16px;
   border:2px solid var(--ink);
   border-radius:18px;
-  font-size:18px;                     /* iOS 키보드 확대 방지 */
+  font-size:18px;
   outline:none;
 }
 
 .btn{
+  display:flex;                       /* 텍스트 가운데 정렬 */
+  justify-content:center;
+  align-items:center;
   height:56px;
   padding:0 20px;
   border:2px solid var(--ink);
@@ -107,8 +110,8 @@ body{
   color:var(--ink);
   background:#fff;
   cursor:pointer;
-  line-height:1.05;
-  white-space:nowrap;                 /* 버튼 텍스트 줄바꿈 방지 */
+  white-space:nowrap;
+  line-height:1.1;
 }
 .btn[disabled]{ opacity:.5; cursor:not-allowed; }
 .btn.primary{ background:var(--ink); color:#fff; }
