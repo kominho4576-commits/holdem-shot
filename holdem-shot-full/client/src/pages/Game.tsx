@@ -6,7 +6,9 @@ import { useStore } from '../state/store'
 import { GameStatePayload, Phase, ComparePayload, RoulettePayload } from '../state/gameTypes'
 
 export default function Game() {
-  const { myId, game, lastCompare, lastRoulette } = useStore(s=>({ myId:s.myId, game:s.game, lastCompare:s.lastCompare, lastRoulette:s.lastRoulette }))
+  const { myId, game, lastCompare, lastRoulette } = useStore(s=>({
+    myId:s.myId, game:s.game, lastCompare:s.lastCompare, lastRoulette:s.lastRoulette
+  }))
   const setGame = useStore(s=>s.setGame)
   const setCompare = useStore(s=>s.setCompare)
   const setRoulette = useStore(s=>s.setRoulette)
@@ -16,6 +18,7 @@ export default function Game() {
 
   const [sel, setSel] = useState<number[]>([])
   const [opBlink, setOpBlink] = useState(false)
+  const [rrCount, setRrCount] = useState<number|null>(null)
 
   const me = game ? game.players[myId] : undefined
   const oppId = game ? Object.keys(game.players).find(id=>id!==myId) : undefined
@@ -23,7 +26,15 @@ export default function Game() {
 
   useEffect(()=>{
     const sock = getSocket()
-    const onState = (payload: GameStatePayload) => { setGame(payload); setSel([]); resetRoundVisuals(); setOpBlink(false) }
+    const onState = (payload: GameStatePayload) => {
+      setGame(payload); setSel([]); resetRoundVisuals(); setOpBlink(false)
+      // 룰렛 단계에 들어오면 카운트다운 시작
+      if (payload.phase === 'ROULETTE') {
+        setRrCount(5)
+      } else {
+        setRrCount(null)
+      }
+    }
     const onCompare = (p: ComparePayload) => setCompare(p)
     const onRoulette = (p: RoulettePayload) => setRoulette(p)
     const onResult = (p:any) => { setResult(p); setRoute('result') }
@@ -36,6 +47,17 @@ export default function Game() {
     sock.on('peer_exchange_hint', onPeerHint)
     return ()=>{ sock.off('state', onState); sock.off('compare', onCompare); sock.off('roulette', onRoulette); sock.off('result', onResult); sock.off('peer_exchange_hint', onPeerHint) }
   }, [resetRoundVisuals, setCompare, setGame, setResult, setRoute, setRoulette])
+
+  // 5초 카운트 후 서버에 룰렛 시작 요청
+  useEffect(()=>{
+    if (rrCount==null) return
+    if (rrCount > 0) {
+      const t = setTimeout(()=> setRrCount(rrCount-1), 1000)
+      return ()=> clearTimeout(t)
+    }
+    // 0이 되면 신호 보냄
+    getSocket().emit('roulette_start')
+  }, [rrCount])
 
   if (!game || !me || !opp) return null
 
@@ -52,9 +74,7 @@ export default function Game() {
     })
   }
 
-  const clickReady = () => {
-    getSocket().emit('ready')
-  }
+  const clickReady = () => getSocket().emit('ready')
 
   const surrender = () => {
     if (confirm('Are you sure you want to surrender?')) getSocket().emit('surrender')
@@ -62,14 +82,22 @@ export default function Game() {
 
   // Roulette flash color
   const flash = (() => {
-    if (!lastRoulette) return 'none'
-    if (!lastCompare) return 'none'
+    if (!lastRoulette || !lastCompare) return 'none'
     const iLost = lastCompare.loserId === myId
     if (lastRoulette.text === 'BANG!') return iLost ? 'red' : 'white'
     return 'none'
   })() as 'none'|'red'|'white'
 
   const readyCount = Object.values(game.players).filter(p=>p.ready).length
+
+  // 현재 차례: 서버 activeId가 있으면 사용, 없으면 EX-Phase에서 아직 ready가 아닌 쪽
+  const activeId = game.activeId || (
+    game.phase.startsWith('EX')
+      ? Object.values(game.players).find(p=>!p.ready)?.id
+      : undefined
+  )
+  const meActive = activeId === me.id
+  const oppActive = activeId === opp.id
 
   return (
     <div className="screen game-layout">
@@ -81,13 +109,20 @@ export default function Game() {
         {/* Opponent name + indicator */}
         <div className="name-row right">
           <span className="name">{opp.nickname || 'PLAYER2'}</span>
-          {game.phase.startsWith('EX') && !opp.ready && <span className="green-dot" />}
+          {oppActive && <span className="green-dot" />}
+        </div>
+
+        {/* Opponent hidden hand at top-left (두 장, 룰렛 영역에서 제거) */}
+        <div className="op-hand">
+          <CardBack />
+          <CardBack />
+          {opBlink && <div className="blink-hint" />}
         </div>
 
         {/* Board */}
         <div className="board">
           <CardRow>
-            {[0,1].map(i=> <Card key={i} back />)}
+            {/* (상단 가운데에 상대 카드 두 장이 보이지 않게: 여기선 숨김) */}
           </CardRow>
           <CardRow>
             {Array.from({length:5}).map((_,i)=> (
@@ -113,24 +148,13 @@ export default function Game() {
         {/* My name + indicator */}
         <div className="name-row">
           <span className="name">{me.nickname || 'PLAYER1'}</span>
-          {game.phase.startsWith('EX') && !me.ready && <span className="green-dot" />}
+          {meActive && <span className="green-dot" />}
         </div>
       </div>
 
-      {/* Right: Roulette */}
+      {/* Right: Roulette (자동 카운트다운) */}
       <div className="roulette-side">
-        <Roulette data={lastRoulette} flash={flash} />
-        <button className="btn start" disabled>START</button>
-        {/* START 버튼은 연출용 (서버가 회전/정지를 브로드캐스트) */}
-      </div>
-
-      {/* Opponent hand backs row (with blink when selecting) */}
-      <div className="op-backs">
-        <CardRow>
-          <CardBack />
-          <CardBack />
-        </CardRow>
-        {opBlink && <div className="blink-hint" />}
+        <Roulette data={lastRoulette} flash={flash} countdown={rrCount} />
       </div>
     </div>
   )
