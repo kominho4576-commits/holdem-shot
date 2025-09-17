@@ -1,299 +1,333 @@
-/**
- * Hold’em & Shot – Server bootstrap (FULL)
- * - Express + Socket.IO
- * - CORS: *.vercel.app / *.onrender.com / localhost 허용 + env 추가 허용
- * - Quick Match(8s 미매칭 시 AI) / Create & Join Room(6자리)
- * - Surrender: 즉시 패배 처리 → game:result 방송(클라는 바로 결과 화면)
- * - 매치 직후 선공 무작위(yourSeat 포함) → 엔진이 턴을 관리하되 시작 좌석 힌트를 제공
- */
-
-import "dotenv/config";
-import express, { Request, Response } from "express";
+import express from "express";
+import http from "http";
 import cors from "cors";
-import { createServer } from "http";
 import { Server } from "socket.io";
-import { customAlphabet } from "nanoid";
 
-import type { Room, ServerUser, MatchPayload } from "./game/types.js";
-import { startRound, wireGameHandlers } from "./game/engine.js";
+type Seat = "P1" | "P2";
+type Phase = "Dealing" | "Flop" | "Turn" | "River";
+type Card = { r?: number; s?: number; isJoker?: boolean };
 
-/* =========================
- * Config
- * =======================*/
-const PORT = Number(process.env.PORT || 8080);
-const RAW_ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:5173")
+const app = express();
+
+// ----- CORS -----
+const allowedOrigins = (process.env.CORS_ORIGIN || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
-
-// 와일드카드 허용 규칙
-function isAllowedOrigin(origin?: string): boolean {
-  if (!origin) return true; // curl 등
-  try {
-    const u = new URL(origin);
-    const host = u.hostname;
-
-    // 1) 환경변수로 명시한 풀 오리진
-    if (RAW_ORIGINS.includes(origin)) return true;
-    // 2) vercel.app 전체 허용(프리뷰 포함)
-    if (host.endsWith(".vercel.app")) return true;
-    // 3) onrender.com(서버 자기 자신) / localhost 허용
-    if (host.endsWith(".onrender.com") || host === "localhost") return true;
-  } catch { /* ignore malformed origin */ }
-  return false;
-}
-
-// 6자리 영숫자 코드
-const nano6 = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
-
-/* =========================
- * App / IO
- * =======================*/
-const app = express();
-app.use(express.json());
 app.use(
   cors({
-    origin: (origin, cb) => cb(isAllowedOrigin(origin) ? null : new Error("Not allowed by CORS"), isAllowedOrigin(origin)),
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      const ok = allowedOrigins.length === 0 || allowedOrigins.includes(origin);
+      cb(ok ? null : new Error("CORS blocked"), ok);
+    },
     credentials: true,
   })
 );
 
-const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: {
-    origin: (origin, cb) => cb(isAllowedOrigin(origin) ? null : new Error("Not allowed by CORS"), isAllowedOrigin(origin)),
-    credentials: true,
-  },
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: { origin: allowedOrigins, credentials: true },
 });
 
-/* =========================
- * In-memory state
- * =======================*/
+// ====== 게임 상태 ======
+type Room = {
+  id: string;
+  seats: { P1?: string; P2?: string };
+  names: { P1: string; P2: string };
+  round: number;
+  phase: Phase;
+  turn: Seat; // 현재 교환 차례
+  deck: Card[];
+  board: Card[]; // 공유 (조커 제외)
+  hole: { P1: Card[]; P2: Card[] };
+  ready: Set<string>;
+  lastStarter: Seat; // 이전 교환에서 먼저 했던 사람
+};
+
 const rooms = new Map<string, Room>();
-let quickQueue: {
-  waiting: { socketId: string; nickname: string; enqueuedAt: number } | null;
-} = { waiting: null };
+const queue: string[] = []; // 대기열
 
-/* =========================
- * Helpers
- * =======================*/
-type Seat = "P1" | "P2";
+// ====== 유틸 ======
+const suits = [0, 1, 2, 3]; // ♠ ♥ ♦ ♣
+const rankRange = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]; // 11~14: J Q K A
 
-function makeAIName(): string {
-  const pool = ["HAL9000", "EchoBot", "RogueAI", "TuringKid", "DealerX", "PokerDroid", "Synthia", "Atlas"];
-  return pool[Math.floor(Math.random() * pool.length)];
+function makeDeck(): Card[] {
+  const deck: Card[] = [];
+  for (const s of suits) for (const r of rankRange) deck.push({ r, s });
+  // 조커 2장
+  deck.push({ isJoker: true });
+  deck.push({ isJoker: true });
+  return shuffle(deck);
 }
-function getSocketNickname(socket: any): string {
-  const raw = (socket.data?.nickname as string | undefined) || "";
-  const trimmed = raw.trim();
-  return trimmed.length ? trimmed : "PLAYER?";
+function shuffle<T>(a: T[]): T[] {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
-function otherSeat(seat: Seat): Seat {
-  return seat === "P1" ? "P2" : "P1";
+function draw(deck: Card[]): Card {
+  const c = deck.pop();
+  if (!c) throw new Error("Deck empty");
+  return c;
 }
-function getSeat(room: Room, socketId: string): Seat | null {
-  if (!room.players.length) return null;
-  if (room.players[0]?.id === socketId) return "P1";
-  if (room.players[1]?.id === socketId) return "P2";
-  return null;
+function drawHole(deck: Card[]): Card[] {
+  return [draw(deck), draw(deck)];
 }
-function putInRoom(roomId: string, socketId: string) {
-  const s = io.sockets.sockets.get(socketId);
-  if (s) s.join(roomId);
-}
-function emitRoomUpdate(roomId: string) {
-  const room = rooms.get(roomId);
-  if (!room) return;
-  io.to(roomId).emit("room:update", {
-    roomId,
-    stage: room.stage,
-    round: room.round,
-    players: room.players.map((p) => ({ id: p.id, nickname: p.nickname, isAI: !!p.isAI })),
-  });
-}
-function cleanupRoomLater(roomId: string, ms = 6000) {
-  const room = rooms.get(roomId);
-  if (!room) return;
-  room.stage = "ended";
-  setTimeout(() => rooms.delete(roomId), ms);
+// **보드는 조커 제외**로 뽑는다
+function drawBoardWithoutJoker(deck: Card[]): Card[] {
+  const b: Card[] = [];
+  while (b.length < 5) {
+    const c = draw(deck);
+    if (c.isJoker) continue; // 버리고 다음으로
+    b.push(c);
+  }
+  return b;
 }
 
-// 매치 성사 → 클라 통지 + 엔진 시작
-function startMatch(room: Room) {
-  room.stage = "playing";
+// 간단한 손 패 이름(서버 샘플용 – 실제 족보 계산기는 더 정교하게 교체 가능)
+import { evaluate7 } from "./poker7"; // 없다면 간단 평가기 대체로 구현해도 됨(여기서는 7장 평가 모듈이 있다고 가정)
 
-  // 선공 무작위 선정(라운드 시작 힌트로 사용)
-  const starter: Seat = Math.random() < 0.5 ? "P1" : "P2";
-  room.meta = room.meta || {};
-  (room.meta as any).starter = starter;
+function handName(cards: Card[]): string {
+  try {
+    return evaluate7(cards); // "Straight Flush", "Four of a Kind", ...
+  } catch {
+    return "-";
+  }
+}
 
-  const payloadFor = (me: ServerUser, opp: ServerUser, seat: Seat): MatchPayload & { yourSeat: Seat } => ({
+function broadcastState(room: Room, resetSelection = false, opSelected?: number) {
+  const payload = {
     roomId: room.id,
-    you: me,
-    opponent: opp,
+    phase: room.phase,
     round: room.round,
-    yourSeat: seat,
-  });
+    turn: room.turn,
+    board: room.board,
+    you: null as any,
+    youName: "",
+    opponentName: "",
+    readyCount: room.ready.size,
+    resetSelection,
+    opSelected,
+  };
 
-  room.players.forEach((p, idx) => {
-    if (p.isAI) return;
-    const opp = room.players[1 - idx];
-    const seat: Seat = idx === 0 ? "P1" : "P2";
-    io.to(p.id).emit("match:started", payloadFor(p, opp, seat));
-  });
-
-  // 엔진 와이어 + 라운드 시작
-  wireGameHandlers(io, room);
-
-  // 엔진이 자체적으로 턴을 관리하더라도, 첫 힌트를 전달(클라에서 Ready 버튼 비활성화 초기화용)
-  io.to(room.id).emit("game:phase", { phase: "Dealing", round: room.round, turn: starter });
-
-  startRound(io, room);
-  emitRoomUpdate(room.id);
+  for (const seat of ["P1", "P2"] as Seat[]) {
+    const sid = room.seats[seat];
+    if (!sid) continue;
+    const other: Seat = seat === "P1" ? "P2" : "P1";
+    const toSend = {
+      ...payload,
+      you: room.hole[seat],
+      youName: room.names[seat],
+      opponentName: room.names[other],
+    };
+    io.to(sid).emit("game:state", toSend);
+  }
 }
 
-/* =========================
- * Express routes
- * =======================*/
-app.get("/health", (_req: Request, res: Response) => {
-  res.json({ ok: true, uptime: process.uptime(), rooms: rooms.size, queueWaiting: !!quickQueue.waiting, allow: RAW_ORIGINS });
-});
-app.get("/status", (_req: Request, res: Response) => {
-  res.json({
-    allowedOrigins: RAW_ORIGINS, port: PORT,
-    rooms: [...rooms.values()].map((r) => ({
-      id: r.id, stage: r.stage, round: r.round,
-      players: r.players.map((p) => ({ id: p.id, nickname: p.nickname, isAI: !!p.isAI })),
-    })),
-  });
-});
+function nextPhase(room: Room) {
+  if (room.phase === "Dealing") room.phase = "Flop";
+  else if (room.phase === "Flop") room.phase = "Turn";
+  else if (room.phase === "Turn") room.phase = "River";
+  io.to(room.id).emit("game:phase", { phase: room.phase, round: room.round, turn: room.turn });
+}
 
-/* =========================
- * Socket.IO handlers
- * =======================*/
-io.on("connection", (socket) => {
-  console.log("[socket] connected:", socket.id);
+function other(seat: Seat): Seat { return seat === "P1" ? "P2" : "P1"; }
 
-  socket.on("home:hello", (payload: { nickname?: string } = {}) => {
-    socket.data.nickname = (payload.nickname || "").trim();
-    socket.emit("home:hello:ack", { ok: true, nickname: getSocketNickname(socket), serverTime: Date.now() });
+// ====== 소켓 ======
+io.on("connection", (sock) => {
+  let nickname = `PLAYER${Math.random() < 0.5 ? 1 : 2}`;
+
+  sock.on("home:hello", (p: any) => {
+    if (p?.nickname) nickname = String(p.nickname).slice(0, 16);
+    sock.emit("home:hello:ack", { nickname });
   });
 
-  // Quick Match
-  socket.on("match:quick", () => {
-    const nickname = getSocketNickname(socket);
+  sock.on("match:quick", () => {
+    if (!queue.includes(sock.id)) queue.push(sock.id);
+    if (queue.length >= 2) {
+      const a = queue.shift()!, b = queue.shift()!;
+      const roomId = createRoom();
+      const room = rooms.get(roomId)!;
+      room.seats.P1 = a; room.seats.P2 = b;
+      room.names.P1 = nickname;
+      io.to(a).emit("match:paired", { role: "PLAYER1" });
+      io.to(b).emit("match:paired", { role: "PLAYER2" });
+      startRound(room);
+      io.to(a).emit("match:started", { roomId, yourSeat: "P1", round: room.round });
+      io.to(b).emit("match:started", { roomId, yourSeat: "P2", round: room.round });
+    } else {
+      sock.emit("match:queued", {});
+    }
+  });
 
-    // 누군가 대기중이면 즉시 매칭
-    if (quickQueue.waiting && io.sockets.sockets.has(quickQueue.waiting.socketId)) {
-      const other = quickQueue.waiting; quickQueue.waiting = null;
+  sock.on("room:create", () => {
+    const id = createRoom();
+    const r = rooms.get(id)!;
+    r.seats.P1 = sock.id;
+    r.names.P1 = nickname || "PLAYER1";
+    sock.join(id);
+    sock.emit("room:created", { roomId: id });
+  });
 
-      const roomId = nano6();
-      const room: Room = {
-        id: roomId, createdAt: Date.now(),
-        players: [{ id: other.socketId, nickname: other.nickname }, { id: socket.id, nickname }],
-        stage: "matching", round: 1, timers: { aiFallback: null }, meta: { mode: "quick" },
-      };
-      rooms.set(roomId, room);
+  sock.on("room:join", (p: any) => {
+    const id = (p?.roomId || "").toUpperCase();
+    const r = rooms.get(id);
+    if (!r) return sock.emit("room:join:error", { message: "Room not found" });
+    if (r.seats.P2) return sock.emit("room:join:error", { message: "Room is full" });
+    r.seats.P2 = sock.id; r.names.P2 = nickname || "PLAYER2";
+    sock.join(id);
+    startRound(r);
+    io.to(r.seats.P1!).emit("match:started", { roomId: id, yourSeat: "P1", round: r.round });
+    io.to(r.seats.P2!).emit("match:started", { roomId: id, yourSeat: "P2", round: r.round });
+  });
 
-      putInRoom(roomId, other.socketId); putInRoom(roomId, socket.id);
-      io.to(other.socketId).emit("match:paired", { roomId, role: "PLAYER1" });
-      socket.emit("match:paired", { roomId, role: "PLAYER2" });
+  sock.on("game:ready", (p: any) => {
+    const room = rooms.get(p?.roomId);
+    if (!room) return;
+    room.ready.add(sock.id);
 
-      startMatch(room); return;
+    // 준비(Dealing) 단계: 2명 완료시 플랍 오픈 + 선 플레이어 랜덤
+    if (room.phase === "Dealing" && room.ready.size === 2) {
+      room.ready.clear();
+      room.turn = Math.random() < 0.5 ? "P1" : "P2";
+      nextPhase(room);
+      broadcastState(room, true);
+      return;
     }
 
-    // 내가 첫 대기자 → 8s 후 AI 매칭
-    quickQueue.waiting = { socketId: socket.id, nickname, enqueuedAt: Date.now() };
-    socket.emit("match:queued", { timeoutSec: 8 });
+    // 교환 단계: 요청자가 누구인지 좌석 판정
+    const seat: Seat = room.seats.P1 === sock.id ? "P1" : "P2";
+    if (seat !== room.turn) return; // 내 차례가 아니면 무시
 
-    const aiTimer = setTimeout(() => {
-      if (!quickQueue.waiting || quickQueue.waiting.socketId !== socket.id) return;
+    // keepIndexes 로 남길 카드 적용
+    const keep: number[] = Array.isArray(p?.keepIndexes) ? p.keepIndexes : [0, 1];
+    const newCards = room.hole[seat].map((c, idx) => (keep.includes(idx) ? c : draw(room.deck)));
+    room.hole[seat] = newCards;
 
-      const roomId = nano6();
-      const ai: ServerUser = { id: `AI:${roomId}`, nickname: makeAIName(), isAI: true };
-      const room: Room = {
-        id: roomId, createdAt: Date.now(),
-        players: [{ id: socket.id, nickname }, ai],
-        stage: "matching", round: 1, timers: { aiFallback: null }, meta: { mode: "quick" },
-      };
-      rooms.set(roomId, room);
+    // 턴을 상대에게 넘김
+    room.turn = other(room.turn);
+    broadcastState(room, false, 1); // 상대 쪽 카드 반짝 효과
 
-      putInRoom(roomId, socket.id);
-      socket.emit("match:paired", { roomId, role: "PLAYER1", vsAI: true });
-
-      quickQueue.waiting = null;
-      startMatch(room);
-    }, 8000);
-
-    socket.once("disconnect", () => clearTimeout(aiTimer));
+    // 한 라운드의 교환 = 두 명 모두 1번씩 교환하면 다음 공개
+    // ready set 로 체크
+    room.ready.add(sock.id);
+    if (room.ready.has(room.seats.P1!) && room.ready.has(room.seats.P2!)) {
+      room.ready.clear();
+      if (room.phase === "Flop") { room.phase = "Turn"; }
+      else if (room.phase === "Turn") { room.phase = "River"; }
+      else if (room.phase === "River") {
+        // 쇼다운
+        settle(room);
+        return;
+      }
+      // 다음 공개 시작, 선 플레이어는 직전 후순
+      room.turn = seat === "P1" ? "P1" : "P2"; // 직전 seat 이 후순이었다면 이번엔 그가 선이 되도록 서버 로직 맞춤
+      nextPhase(room);
+      broadcastState(room, true);
+    }
   });
 
-  // Create / Join
-  socket.on("room:create", () => {
-    const roomId = nano6();
-    const nickname = getSocketNickname(socket);
-    const room: Room = {
-      id: roomId, createdAt: Date.now(),
-      players: [{ id: socket.id, nickname }],
-      stage: "matching", round: 1, timers: { aiFallback: null }, meta: { mode: "code" },
-    };
-    rooms.set(roomId, room); putInRoom(roomId, socket.id);
-    socket.emit("room:created", { roomId }); emitRoomUpdate(roomId);
+  sock.on("game:surrender", (p: any) => {
+    const room = rooms.get(p?.roomId);
+    if (!room) return;
+    const seat: Seat = room.seats.P1 === sock.id ? "P1" : "P2";
+    const winnerSeat: Seat = seat === "P1" ? "P2" : "P1";
+    // 즉시 게임 종료
+    io.to(room.id).emit("game:over", { winnerSeat, round: room.round });
+    rooms.delete(room.id);
   });
 
-  socket.on("room:join", (payload: { roomId: string }) => {
-    const roomId = (payload?.roomId || "").trim().toUpperCase();
-    const room = rooms.get(roomId);
-    if (!room) return socket.emit("room:join:error", { message: "Room not found" });
-    if (room.players.length >= 2) return socket.emit("room:join:error", { message: "Room is full" });
-
-    const nickname = getSocketNickname(socket);
-    room.players.push({ id: socket.id, nickname }); putInRoom(roomId, socket.id);
-    io.to(roomId).emit("room:joined", { roomId, players: room.players }); emitRoomUpdate(roomId);
-    if (room.players.length === 2) startMatch(room);
-  });
-
-  // ===== SURRENDER: 즉시 패배 처리 =====
-  socket.on("game:surrender", (payload: { roomId: string }) => {
-    const roomId = (payload?.roomId || "").trim();
-    const room = rooms.get(roomId); if (!room) return;
-
-    const mySeat = getSeat(room, socket.id); if (!mySeat) return;
-    const winSeat = otherSeat(mySeat);
-
-    io.to(roomId).emit("game:result", {
-      roomId, round: room.round, winnerSeat: winSeat, reason: "surrender",
-      // 클라가 텍스트를 표시할 수 있도록 최소 정보
-      loserSeat: mySeat,
-    });
-
-    cleanupRoomLater(roomId, 6000);
-  });
-
-  // Ping
-  socket.on("server:ping", () => socket.emit("server:pong", { t: Date.now(), ok: true }));
-
-  // Disconnect 정리
-  socket.on("disconnect", () => {
-    if (quickQueue.waiting?.socketId === socket.id) quickQueue.waiting = null;
-
-    for (const room of rooms.values()) {
-      const idx = room.players.findIndex((p) => p.id === socket.id);
-      if (idx >= 0) {
-        room.players.splice(idx, 1);
-        emitRoomUpdate(room.id);
-        if (room.players.length === 0 || (room.players.length === 1 && room.players[0].isAI)) rooms.delete(room.id);
+  sock.on("disconnect", () => {
+    // 방에서 정리
+    for (const [id, r] of rooms) {
+      if (r.seats.P1 === sock.id || r.seats.P2 === sock.id) {
+        const winnerSeat: Seat = r.seats.P1 === sock.id ? "P2" : "P1";
+        io.to(r.id).emit("game:over", { winnerSeat, round: r.round });
+        rooms.delete(id);
         break;
       }
     }
-    console.log("[socket] disconnected:", socket.id);
+    const idx = queue.indexOf(sock.id);
+    if (idx >= 0) queue.splice(idx, 1);
   });
 });
 
-/* =========================
- * Start
- * =======================*/
-httpServer.listen(PORT, () => {
-  console.log(`Hold’em & Shot server on :${PORT}`);
-  console.log("Allowed Origins (env):", RAW_ORIGINS.join(", ") || "(none)");
-});
+// ====== 라운드 시작/정산 ======
+function createRoom(): string {
+  const id = genCode();
+  const room: Room = {
+    id,
+    seats: {},
+    names: { P1: "PLAYER1", P2: "PLAYER2" },
+    round: 1,
+    phase: "Dealing",
+    turn: "P1",
+    deck: [],
+    board: [],
+    hole: { P1: [], P2: [] },
+    ready: new Set(),
+    lastStarter: "P1",
+  };
+  rooms.set(id, room);
+  return id;
+}
+
+function startRound(room: Room) {
+  room.phase = "Dealing";
+  room.deck = makeDeck();
+  room.board = drawBoardWithoutJoker(room.deck); // **조커 없는 보드**
+  room.hole.P1 = drawHole(room.deck);
+  room.hole.P2 = drawHole(room.deck);
+  room.turn = Math.random() < 0.5 ? "P1" : "P2";
+  io.to(room.id).emit("game:phase", { phase: room.phase, round: room.round, turn: room.turn });
+  broadcastState(room, true);
+}
+
+function settle(room: Room) {
+  const sevenP1 = [...room.hole.P1, ...room.board];
+  const sevenP2 = [...room.hole.P2, ...room.board];
+  const name1 = handName(sevenP1);
+  const name2 = handName(sevenP2);
+
+  // winner 계산 (여기서는 문자열 비교 대신 평가모듈에서 승패 결과도 함께 반환하는게 베스트)
+  // 데모: 동률 처리
+  let winnerSeat: Seat | "TIE" = "TIE";
+  if (name1 !== name2) {
+    // 평가기가 점수도 준다면 그 값을 비교하세요. 여기선 이름 우선순위 간단 처리(임시).
+    const prio = ["High Card","Pair","Two Pair","Three of a Kind","Straight","Flush","Full House","Four of a Kind","Straight Flush","Royal Flush"];
+    const s1 = prio.indexOf(name1); const s2 = prio.indexOf(name2);
+    if (s1 > s2) winnerSeat = "P1"; else if (s2 > s1) winnerSeat = "P2";
+  }
+
+  for (const seat of ["P1","P2"] as Seat[]) {
+    const sid = room.seats[seat];
+    if (!sid) continue;
+    io.to(sid).emit("game:result", {
+      youHandName: seat === "P1" ? name1 : name2,
+      oppHandName: seat === "P1" ? name2 : name1,
+      winnerSeat,
+      round: room.round,
+    });
+  }
+
+  // 5초 뒤 러시안 룰렛(패자만)
+  let loserSeat: Seat | null = null;
+  if (winnerSeat !== "TIE") loserSeat = winnerSeat === "P1" ? "P2" : "P1";
+  const bullets = Math.min(6, room.round); // 라운드마다 +1
+  setTimeout(() => {
+    io.to(room.id).emit("game:roulette", { bullets, loserSeat });
+    // SAFE면 다음 라운드, BANG이면 종료는 클라/서버 협업 처리
+  }, 5000);
+}
+
+function genCode(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i = 0; i < 5; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`server on :${PORT}`));
