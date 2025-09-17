@@ -1,95 +1,151 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import ServerPill from "../components/ServerPill";
 import { socket } from "../lib/socket";
 
 export default function Home() {
   const nav = useNavigate();
   const [nickname, setNickname] = useState("");
-  const [createdCode, setCreatedCode] = useState("");  // 서버가 준 코드만 표시
+  const [showCreate, setShowCreate] = useState(false);
+  const [showJoin, setShowJoin] = useState(false);
+  const [createdCode, setCreatedCode] = useState("");
   const [joinCode, setJoinCode] = useState("");
-  const once = useRef(false);
 
-  // 서버에 닉네임 등록
+  // nickname 등록
   useEffect(() => {
-    if (once.current) return;
-    once.current = true;
     socket.emit("home:hello", { nickname });
-  }, []);
+    const ack = (p: any) => {
+      if (!nickname && p?.nickname) setNickname(p.nickname);
+    };
+    socket.on("home:hello:ack", ack);
+    return () => socket.off("home:hello:ack", ack);
+  }, [nickname]);
 
-  // 방/매치 이벤트 → 즉시 네비게이트
+  // 매치 이벤트 바인딩
   useEffect(() => {
-    const toMatch = () => nav("/match", { replace: true });
-    const toGame = (p:any) => nav("/game", { replace: true, state: p });
+    const onQueued = () => nav("/match", { replace: true });
+    const onPaired = (p: any) => {
+      if (p?.role) sessionStorage.setItem("seatRole", p.role);
+      nav("/match", { replace: true });
+    };
+    const onStarted = (p: any) => {
+      if (p?.yourSeat) sessionStorage.setItem("mySeat", p.yourSeat);
+      nav("/game", { replace: true, state: p });
+    };
 
-    socket.on("match:queued", toMatch);
-    socket.on("match:paired", toMatch);
-    socket.on("room:joined", toMatch);       // 코드 매치에서 대기 화면으로
-    socket.on("match:started", toGame);      // 바로 게임으로
-
-    // 코드 생성 결과
-    socket.on("room:created", (p:{roomId:string}) => setCreatedCode(p.roomId));
-    socket.on("room:join:error", (e) => alert(e.message || "Join failed"));
-
+    socket.on("match:queued", onQueued);
+    socket.on("match:paired", onPaired);
+    socket.on("match:started", onStarted);
     return () => {
-      socket.off("match:queued", toMatch);
-      socket.off("match:paired", toMatch);
-      socket.off("room:joined", toMatch);
-      socket.off("match:started", toGame);
-      socket.off("room:created");
-      socket.off("room:join:error");
+      socket.off("match:queued", onQueued);
+      socket.off("match:paired", onPaired);
+      socket.off("match:started", onStarted);
     };
   }, [nav]);
 
-  function onQuick() {
-    const nick = nickname.trim().length ? nickname.trim() : "PLAYER1";
-    socket.emit("home:hello", { nickname: nick });
+  // 룸 관련
+  useEffect(() => {
+    const onCreated = (p: any) => {
+      setCreatedCode(p.roomId || "");
+      setShowCreate(true);
+    };
+    const onJoinError = (p: any) => alert(p?.message || "Join failed");
+
+    socket.on("room:created", onCreated);
+    socket.on("room:join:error", onJoinError);
+    return () => {
+      socket.off("room:created", onCreated);
+      socket.off("room:join:error", onJoinError);
+    };
+  }, []);
+
+  const handleQuick = () => {
+    if (!nickname.trim()) {
+      alert("Enter a nickname first");
+      return;
+    }
+    socket.emit("home:hello", { nickname: nickname.trim() });
     socket.emit("match:quick");
-  }
+  };
 
-  function onCreateRoom() {
-    const nick = nickname.trim().length ? nickname.trim() : "PLAYER1";
-    setCreatedCode("..."); // 서버 응답 대기
-    socket.emit("home:hello", { nickname: nick });
+  const handleCreate = () => {
+    if (!nickname.trim()) {
+      alert("Enter a nickname first");
+      return;
+    }
+    socket.emit("home:hello", { nickname: nickname.trim() });
     socket.emit("room:create");
-  }
+  };
 
-  function onJoinRoom() {
+  const handleJoinOpen = () => {
+    setShowJoin(true);
+    setJoinCode("");
+  };
+
+  const handleJoinConfirm = () => {
     const code = joinCode.trim().toUpperCase();
-    if (code.length !== 6) return alert("Enter 6-letter code");
-    const nick = nickname.trim().length ? nickname.trim() : "PLAYER2";
-    socket.emit("home:hello", { nickname: nick });
+    if (!code) return;
     socket.emit("room:join", { roomId: code });
-  }
+  };
 
   return (
-    <div className="center-col">
-      <div className="h1">Hold’em&Shot.io</div>
+    <div className="page home">
+      <div className="title">Hold’em&Shot.io</div>
 
-      <div className="card card-home">
-        {/* Row1 */}
-        <div className="row wrap">
-          <input className="input grow" placeholder="Nickname" value={nickname}
-                 onChange={(e)=>setNickname(e.target.value)} />
-          <button className="btn btn-big" onClick={onQuick}>Quick Match</button>
+      {/* 상단: 닉네임 + 퀵 매치 나란히 */}
+      <div className="card home-card">
+        <div className="form-grid">
+          <input
+            className="input"
+            placeholder="Nickname"
+            value={nickname}
+            onChange={(e) => setNickname(e.target.value)}
+          />
+          <button className="btn btn-solid" onClick={handleQuick}>Quick Match</button>
         </div>
 
-        {/* Row2 */}
-        <div className="row wrap">
-          <button className="btn btn-big" onClick={onCreateRoom}>Create Room</button>
-          <div className="input codebox fixed" aria-label="room-code">{createdCode}</div>
-        </div>
-
-        {/* Row3 */}
-        <div className="row wrap">
-          <input className="input grow" placeholder="Enter Code"
-                 value={joinCode} onChange={(e)=>setJoinCode(e.target.value.toUpperCase())}/>
-          <button className="btn btn-big" onClick={onJoinRoom}>Join Room</button>
+        {/* 하단: 반반 버튼 */}
+        <div className="two-grid">
+          <button className="btn" onClick={handleCreate}>Create Room</button>
+          <button className="btn" onClick={handleJoinOpen}>Join Room</button>
         </div>
       </div>
 
-      <div style={{width:"min(520px,92vw)"}}>
-        <ServerPill />
+      {/* Create Room Sheet */}
+      {showCreate && (
+        <Modal onClose={() => setShowCreate(false)}>
+          <div className="modal-title">Room Created</div>
+          <div className="code-big">{createdCode || "------"}</div>
+          <div className="two-grid">
+            <button className="btn" onClick={() => setShowCreate(false)}>Close</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Join Room Sheet */}
+      {showJoin && (
+        <Modal onClose={() => setShowJoin(false)}>
+          <div className="modal-title">Join Room</div>
+          <input
+            className="input"
+            placeholder="Enter Code"
+            value={joinCode}
+            onChange={(e) => setJoinCode(e.target.value)}
+          />
+          <div className="two-grid">
+            <button className="btn" onClick={() => setShowJoin(false)}>Close</button>
+            <button className="btn btn-solid" onClick={handleJoinConfirm}>Confirm</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function Modal({ children, onClose }: { children: any; onClose: () => void }) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        {children}
       </div>
     </div>
   );
