@@ -21,10 +21,25 @@ export default function Home() {
   const setGame = useStore(s=>s.setGame)
   const setServerOnline = useStore(s=>s.setServerOnline)
 
+  // 저장된 닉네임 로드
+  useEffect(()=>{
+    const saved = localStorage.getItem('hs_nick') || ''
+    if (saved) {
+      setNickname(saved)
+      getSocket().emit('set_nickname', saved)
+    }
+  }, [setNickname])
+
   useEffect(()=>{
     const sock = getSocket()
-    const onConnect = () => { useStore.getState().setMyId(sock.id); setServerOnline(true) }
-    const onDisconnect = () => useStore.getState().setServerOnline(false)
+    const onConnect = () => {
+      useStore.getState().setMyId(sock.id)
+      setServerOnline(true)
+      // 접속 시점에 닉네임 다시 전송 (모바일 사파리에서 blur 누락 방지)
+      const name = (useStore.getState().nickname || '').trim()
+      sock.emit('set_nickname', name)
+    }
+    const onDisconnect = () => setServerOnline(false)
     const onState = (payload:any) => { setGame(payload); setRoute('game') }
     const onServer = (p:any) => setServerOnline(!!p?.online)
 
@@ -36,23 +51,24 @@ export default function Home() {
     return ()=>{ sock.off('connect', onConnect); sock.off('disconnect', onDisconnect); sock.off('state', onState); sock.off('server_status', onServer) }
   }, [setGame, setRoute, setServerOnline])
 
-  const setName = () => {
-    const name = nickname?.trim() || ''
+  const applyName = (value: string) => {
+    const name = value.trim().slice(0,16)
+    setNickname(name)
+    localStorage.setItem('hs_nick', name)
     getSocket().emit('set_nickname', name)
   }
 
   const quickMatch = () => {
-    const sock = getSocket()
+    applyName(nickname)
     setConnecting(true)
     setRoute('match')
-    sock.emit('quick_match', {}, () => {})
+    getSocket().emit('quick_match', {}, () => {})
   }
 
   const createRoom = () => {
-    const sock = getSocket()
+    applyName(nickname)
     const code = sixCode()
-    // 서버에서 생성하도록 이벤트 제공: 여기선 결과 code만 수신
-    sock.emit('create_room', {}, (res:any)=>{
+    getSocket().emit('create_room', {}, (res:any)=>{
       const c = res?.code || code
       setCreatedCode(c)
     })
@@ -60,8 +76,8 @@ export default function Home() {
 
   const joinRoom = () => {
     if (!joinCode) return
-    const sock = getSocket()
-    sock.emit('join_room', joinCode.trim().toUpperCase(), (res:any)=>{
+    applyName(nickname)
+    getSocket().emit('join_room', joinCode.trim().toUpperCase(), (res:any)=>{
       if (!res?.ok) alert('Room not found')
     })
     setRoute('match')
@@ -77,8 +93,7 @@ export default function Home() {
             className="input"
             placeholder="Nickname"
             value={nickname}
-            onChange={e=>setNickname(e.target.value)}
-            onBlur={setName}
+            onChange={e=>applyName(e.target.value)}
             maxLength={16}
           />
           <button className="btn" onClick={quickMatch} disabled={connecting}>Quick Match</button>
@@ -96,7 +111,6 @@ export default function Home() {
       </div>
 
       <ServerIndicator />
-
       <div className="orientation-hint">Rotate to landscape</div>
     </div>
   )
