@@ -7,7 +7,7 @@
 import type { Room, ServerUser } from "./types.js";
 import { customAlphabet } from "nanoid";
 
-// 0,1,O,I 를 제외한 대문자+숫자 (6자리)
+// 0,1,O,I 제외한 6자리 코드
 const nano6 = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
 
 // ===== 인메모리 룸/큐 =====
@@ -38,7 +38,7 @@ export function enqueueQuick(socketId: string, nickname: string) {
   return quickQueue.waiting;
 }
 
-// 대기열 취소 (연결 끊김 등)
+// 대기열 취소(연결 끊김 등)
 export function cancelQuick(socketId: string) {
   if (quickQueue.waiting?.socketId === socketId) {
     quickQueue.waiting = null;
@@ -62,11 +62,10 @@ export function tryMatch(socketId: string, nickname: string) {
       ],
       stage: "matching",
       round: 1,
-      // setTimeout 핸들 타입 안전하게
       timers: { aiFallback: null as ReturnType<typeof setTimeout> | null },
       meta: {
         mode: "quick",
-        // 선공 랜덤 선택이 필요하면 여기서 기록(서버/클라이언트 어디서 쓰든 일관되게)
+        // 선공 랜덤 배정(필요 시 클라/서버 로직에서 사용)
         firstTurnPlayerId: Math.random() < 0.5 ? other.socketId : socketId,
       },
     };
@@ -89,7 +88,7 @@ export function createRoom(ownerId: string, nickname: string) {
     stage: "matching",
     round: 1,
     timers: { aiFallback: null as ReturnType<typeof setTimeout> | null },
-    meta: { mode: "code" },
+    meta: { mode: "code" }, // code 모드에는 선공 미지정(입장 완료 후 추첨)
   };
   rooms.set(roomId, room);
   return room;
@@ -105,18 +104,16 @@ export function joinRoom(roomId: string, user: ServerUser) {
   return room;
 }
 
-// 방 떠나기 (연결 끊김/나가기)
+// 방 떠나기(연결 끊김/나가기)
 export function leaveRoom(roomId: string, userId: string) {
   const room = rooms.get(roomId);
   if (!room) return;
 
   room.players = room.players.filter((p) => p.id !== userId);
 
-  // 타이머 정리
+  // 남아있는 인원이 없으면 타이머 정리 후 방 제거
   if (room.players.length === 0) {
-    if (room.timers.aiFallback) {
-      clearTimeout(room.timers.aiFallback);
-    }
+    if (room.timers.aiFallback) clearTimeout(room.timers.aiFallback);
     rooms.delete(roomId);
   }
 }
