@@ -13,9 +13,12 @@ export type ServerUser = {
 };
 
 // 서버 내부에서 관리하는 플레이어
+// server/src/types.ts
+
 export type RoomPlayer = {
   id: string;        // socket.id
-  nickname: string;  // 표시용 닉네임
+  nickname: string;  // 닉네임
+  isAI: boolean;     // ✅ 추가: AI 여부
 };
 
 // 룸 정보
