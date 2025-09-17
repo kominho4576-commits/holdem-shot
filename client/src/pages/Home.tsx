@@ -10,7 +10,6 @@ export default function Home() {
   const [createdCode, setCreatedCode] = useState("");
   const [joinCode, setJoinCode] = useState("");
 
-  // nickname 등록
   useEffect(() => {
     socket.emit("home:hello", { nickname });
     const ack = (p: any) => {
@@ -20,7 +19,6 @@ export default function Home() {
     return () => socket.off("home:hello:ack", ack);
   }, [nickname]);
 
-  // 매치 이벤트 바인딩
   useEffect(() => {
     const onQueued = () => nav("/match", { replace: true });
     const onPaired = (p: any) => {
@@ -31,7 +29,6 @@ export default function Home() {
       if (p?.yourSeat) sessionStorage.setItem("mySeat", p.yourSeat);
       nav("/game", { replace: true, state: p });
     };
-
     socket.on("match:queued", onQueued);
     socket.on("match:paired", onPaired);
     socket.on("match:started", onStarted);
@@ -42,14 +39,12 @@ export default function Home() {
     };
   }, [nav]);
 
-  // 룸 관련
   useEffect(() => {
     const onCreated = (p: any) => {
       setCreatedCode(p.roomId || "");
       setShowCreate(true);
     };
     const onJoinError = (p: any) => alert(p?.message || "Join failed");
-
     socket.on("room:created", onCreated);
     socket.on("room:join:error", onJoinError);
     return () => {
@@ -58,21 +53,22 @@ export default function Home() {
     };
   }, []);
 
-  const handleQuick = () => {
+  const mustName = () => {
     if (!nickname.trim()) {
       alert("Enter a nickname first");
-      return;
+      return false;
     }
     socket.emit("home:hello", { nickname: nickname.trim() });
+    return true;
+  };
+
+  const handleQuick = () => {
+    if (!mustName()) return;
     socket.emit("match:quick");
   };
 
   const handleCreate = () => {
-    if (!nickname.trim()) {
-      alert("Enter a nickname first");
-      return;
-    }
-    socket.emit("home:hello", { nickname: nickname.trim() });
+    if (!mustName()) return;
     socket.emit("room:create");
   };
 
@@ -91,8 +87,8 @@ export default function Home() {
     <div className="page home">
       <div className="title">Hold’em&Shot.io</div>
 
-      {/* 상단: 닉네임 + 퀵 매치 나란히 */}
       <div className="card home-card">
+        {/* 모바일에서 버튼 어긋남 방지: 열 폭 자동, 버튼은 고정최대폭 */}
         <div className="form-grid">
           <input
             className="input"
@@ -100,17 +96,17 @@ export default function Home() {
             value={nickname}
             onChange={(e) => setNickname(e.target.value)}
           />
-          <button className="btn btn-solid" onClick={handleQuick}>Quick Match</button>
+          <button className="btn btn-solid btn-qm" onClick={handleQuick}>
+            Quick Match
+          </button>
         </div>
 
-        {/* 하단: 반반 버튼 */}
         <div className="two-grid">
           <button className="btn" onClick={handleCreate}>Create Room</button>
           <button className="btn" onClick={handleJoinOpen}>Join Room</button>
         </div>
       </div>
 
-      {/* Create Room Sheet */}
       {showCreate && (
         <Modal onClose={() => setShowCreate(false)}>
           <div className="modal-title">Room Created</div>
@@ -121,7 +117,6 @@ export default function Home() {
         </Modal>
       )}
 
-      {/* Join Room Sheet */}
       {showJoin && (
         <Modal onClose={() => setShowJoin(false)}>
           <div className="modal-title">Join Room</div>
