@@ -18,7 +18,7 @@ export default function Game() {
   const loc = useLocation();
   const init = (loc.state || {}) as MatchState;
 
-  // 좌석(정확성 최우선: yourSeat > sessionStorage > PLAYER role)
+  // 좌석 판단
   const mySeat: Seat = useMemo(() => {
     if (init.yourSeat) return init.yourSeat;
     const saved = sessionStorage.getItem("mySeat") as Seat | null;
@@ -27,242 +27,283 @@ export default function Game() {
     return role === "PLAYER2" ? "P2" : "P1";
   }, [init.yourSeat]);
 
-  // --- 식별/닉네임 ---
+  // 기본 상태
   const [roomId, setRoomId] = useState<string>(init.roomId || "");
-  const [youInfo, setYouInfo] = useState<{ id: string; nickname: string }>({
-    id: init.you?.id || "",
-    nickname: init.you?.nickname || (mySeat === "P2" ? "PLAYER2" : "PLAYER1"),
-  });
-  const [oppInfo, setOppInfo] = useState<{ id: string; nickname: string }>({
-    id: init.opponent?.id || "",
-    nickname: init.opponent?.nickname || (mySeat === "P2" ? "PLAYER1" : "PLAYER2"),
-  });
+  const [youName, setYouName] = useState(init.you?.nickname || (mySeat === "P1" ? "PLAYER1" : "PLAYER2"));
+  const [oppName, setOppName] = useState(init.opponent?.nickname || (mySeat === "P1" ? "PLAYER2" : "PLAYER1"));
 
-  // --- 진행/보드 상태 ---
   const [phase, setPhase] = useState("Dealing");
   const [round, setRound] = useState(init.round || 1);
   const [board, setBoard] = useState<Card[]>([]);
   const [you, setYou] = useState<Card[]>([]);
-  const [opp, setOpp] = useState<Card[]>([]);
+  const [opp, setOpp] = useState<Card[]>([{ back: true }, { back: true }]); // 항상 뒷면
   const [turn, setTurn] = useState<Seat>("P1");
   const [readyCount, setReadyCount] = useState(0);
   const [selected, setSelected] = useState<number[]>([]);
   const [blinkOpp, setBlinkOpp] = useState(false);
 
-  // 러시안 룰렛 & 결과
-  const [roulette, setRoulette] = useState<{ active: boolean; bullets: number; loser: Seat | null }>({
+  // 쇼다운/룰렛
+  const [showdown, setShowdown] = useState<{ you?: string; opp?: string; winnerSeat?: Seat | "TIE" } | null>(null);
+  const [count3, setCount3] = useState<number | null>(null); // 쇼다운 3초
+  const [toRoulette, setToRoulette] = useState<number | null>(null); // 5초 카운트
+  const [roulette, setRoulette] = useState<{ active: boolean; bullets: number; loser: Seat | null; hit?: boolean }>({
     active: false, bullets: 0, loser: null
   });
-  const [showdown, setShowdown] = useState<{ you?: string; opp?: string; winnerSeat?: Seat | "TIE" } | null>(null);
+  const [flash, setFlash] = useState<"red" | "white" | null>(null);
+
+  // 공개된 공유 카드 수
+  const revealed = useMemo(() => {
+    const p = phase.toLowerCase();
+    if (p === "flop") return 3;
+    if (p === "turn") return 4;
+    if (p === "river") return 5;
+    return 0;
+  }, [phase]);
 
   const isMyTurn = turn === mySeat;
+  const readyMode = phase.toLowerCase() === "dealing";
 
-  // ---------------- Socket 수신 ----------------
+  // 소켓 바인딩
   useEffect(() => {
     const onState = (p: any) => {
       if (p.roomId) setRoomId(p.roomId);
-      if (p.youName || p.opponentName) {
-        if (p.youName) setYouInfo((y) => ({ ...y, nickname: p.youName }));
-        if (p.opponentName) setOppInfo((o) => ({ ...o, nickname: p.opponentName }));
-      }
       setPhase(p.phase); setRound(p.round);
-      setBoard(p.board || []); setYou(p.you || []); setOpp(p.opponent || []);
+      setBoard(p.board || []);
+      setYou(p.you || []);
+      if (p.youName) setYouName(p.youName);
+      if (p.opponentName) setOppName(p.opponentName);
       if (p.turn) setTurn(p.turn);
       if (typeof p.readyCount === "number") setReadyCount(p.readyCount);
+      if (typeof p.opSelected === "number") { setBlinkOpp(true); setTimeout(()=>setBlinkOpp(false), 300); }
     };
-
     socket.on("game:state", onState);
-    socket.on("game:phase", (p: any) => { setPhase(p.phase); setRound(p.round); if (p.turn) setTurn(p.turn); });
-    socket.on("game:swap:blink", (_p: any) => { setBlinkOpp(true); setTimeout(()=>setBlinkOpp(false), 350); });
+    socket.on("game:phase", (p:any)=>{ setPhase(p.phase); setRound(p.round); if (p.turn) setTurn(p.turn); });
 
-    // 결과: surrender면 즉시 결과 화면으로, 그 외엔 텍스트 보여주고 5초 뒤 룰렛(서버 이벤트가 오면 그걸 우선)
-    socket.on("game:result", (p: any) => {
+    socket.on("game:result", (p:any)=>{
+      // 족보 결과 수신 → 텍스트 + 3초 카운트
       setShowdown({ you: p.youHandName, opp: p.oppHandName, winnerSeat: p.winnerSeat });
-      if (p.reason === "surrender") {
-        nav("/result", { replace: true, state: { winnerSeat: p.winnerSeat, round: p.round, reason: "surrender" } });
-      } else {
-        // 5초 뒤 서버가 roulette 이벤트를 안 주면 폴백으로 클라에서도 시작
-        const t = setTimeout(() => {
-          setRoulette((r) => r.active ? r : { active: true, bullets: Math.max(1, (round || 1)), loser: p.winnerSeat === "TIE" ? null : (p.winnerSeat === "P1" ? "P2" : "P1") });
-        }, 5000);
-        return () => clearTimeout(t);
-      }
+      setCount3(3);
     });
 
-    socket.on("game:roulette", (p: any) => {
-      setRoulette({ active: true, bullets: p.bullets, loser: p.loserSeat });
+    socket.on("game:roulette", (p:any)=>{
+      setToRoulette(null);
+      setRoulette({ active:true, bullets:p.bullets, loser:p.loserSeat });
     });
 
-    return () => {
+    return ()=> {
       socket.off("game:state", onState);
-      socket.off("game:phase"); socket.off("game:swap:blink");
-      socket.off("game:result"); socket.off("game:roulette");
+      socket.off("game:phase");
+      socket.off("game:result");
+      socket.off("game:roulette");
     };
-  }, [nav, round, mySeat]);
+  }, []);
 
-  // ---------------- 액션 ----------------
-  function toggleCard(idx: number) {
-    if (!isMyTurn) return; // 내 차례 아닐 땐 선택 불가(시각만)
-    setSelected((sel) => (sel.includes(idx) ? sel.filter((i) => i !== idx) : [...sel, idx]));
+  // 3초 카운트 → 5초 카운트
+  useEffect(()=>{
+    if (count3==null) return;
+    if (count3<=0){
+      setCount3(null);
+      setToRoulette(5);
+      return;
+    }
+    const t=setTimeout(()=>setCount3((v)=> (v??1)-1),1000);
+    return ()=>clearTimeout(t);
+  },[count3]);
+
+  // 5초 카운트 → 클라 폴백으로 룰렛 시작
+  useEffect(()=>{
+    if (toRoulette==null) return;
+    if (toRoulette<=0){
+      setToRoulette(null);
+      setRoulette((r)=> r.active ? r : { active:true, bullets: Math.max(1, round), loser: (showdown?.winnerSeat==="TIE"? null : (showdown?.winnerSeat==="P1"?"P2":"P1")) });
+      return;
+    }
+    const t=setTimeout(()=>setToRoulette((v)=> (v??1)-1),1000);
+    return ()=>clearTimeout(t);
+  },[toRoulette, round, showdown]);
+
+  // 선택
+  function toggleCard(i:number){
+    if (!isMyTurn || readyMode) return;
+    setSelected((s)=> s.includes(i) ? s.filter(x=>x!==i) : (s.length>=2? s : [...s,i]));
   }
-  function onReady() {
-    if (!isMyTurn) return;
-    const keep = [0, 1].filter((i) => !selected.includes(i));
+
+  // Ready/Exchange
+  function onAction(){
     if (!roomId) return;
-    socket.emit("game:ready", { roomId, keepIndexes: keep });
-    setSelected([]);
-  }
-  function onSurrender() {
-    if (!roomId) return;
-    if (window.confirm("Are you sure you want to surrender?")) {
-      socket.emit("game:surrender", { roomId }); // 서버가 즉시 결과 방송 → 바로 /result 로 이동
+    if (readyMode){
+      socket.emit("game:ready", { roomId, keepIndexes: [0,1] });
+    } else {
+      const keep = [0,1].filter(i=> !selected.includes(i));
+      socket.emit("game:ready", { roomId, keepIndexes: keep });
+      setSelected([]);
     }
   }
 
-  // ---------------- 뷰 ----------------
-  // 공개된 공유 카드 갯수(Flop/Turn/River 규칙)
-  const revealed = useMemo(() => {
-    if (phase.toLowerCase() === "flop") return 3;
-    if (phase.toLowerCase() === "turn") return 4;
-    if (phase.toLowerCase() === "river") return 5;
-    return 0; // Dealing
-  }, [phase]);
-
-  // 룰렛 단계면 전용 화면
-  if (roulette.active) {
-    return (
-      <div className="center-col">
-        <NamesBar you={youInfo.nickname} opp={oppInfo.nickname} myTurn={false} oppTurn={false} />
-        <div className="h1">Russian Roulette</div>
-        <div className="sub">ROUND {round}</div>
-        <Roulette bullets={roulette.bullets} loser={roulette.loser || "P2"} />
-      </div>
-    );
+  // 항복
+  function onSurrender(){
+    if (!roomId) return;
+    if (window.confirm("Are you sure you want to surrender?")){
+      socket.emit("game:surrender", { roomId });
+    }
   }
 
   return (
-    <div className="center-col">
-      <NamesBar you={youInfo.nickname} opp={oppInfo.nickname} myTurn={isMyTurn} oppTurn={!isMyTurn} />
-
-      <div className="h1">Phase: {phase}</div>
-      <div className="sub">ROUND {round}</div>
-
-      {/* 상대 카드 (맨 위, 2장 뒷면) */}
-      <div className={`row opp top ${blinkOpp ? "blink" : ""}`}>
-        {[0,1].map(i => <CardBack key={i} />)}
+    <div className="page game">
+      {/* 상단 닉네임/턴 */}
+      <div className="namesbar">
+        <div className="namepill"><span className={`dot-sm ${isMyTurn ? "on":""}`} />{youName}</div>
+        <div className="namepill">{oppName}<span className={`dot-sm ${!isMyTurn ? "on":""}`} /></div>
       </div>
 
-      {/* 공유 카드 (중앙 일렬, 공개 규칙 적용) */}
-      <div className="row board middle">
-        {board.slice(0, revealed).map((c, i) => <CardView key={i} card={c} />)}
-      </div>
+      {/* 중앙 영역을 넉넉하게 사용 */}
+      <div className="stack">
+        <div className="title-sm">Phase: {phase}</div>
+        <div className="sub">ROUND {round}</div>
 
-      {/* 내 카드 (하단) */}
-      <div className="row mine bottom">
-        {you.map((c, i) => (
-          <div key={i} onClick={() => toggleCard(i)} className={selected.includes(i) ? "sel" : ""}>
-            <CardView card={c} />
-          </div>
-        ))}
-      </div>
-
-      {/* 액션 */}
-      <div className="row btns">
-        <button className="btn btn-big" disabled={!isMyTurn} onClick={onReady}>
-          Ready {readyCount}/2
-        </button>
-        <button className="btn btn-big" onClick={onSurrender}>Surrender</button>
-      </div>
-
-      {/* 쇼다운 텍스트 */}
-      {showdown && showdown.winnerSeat && (
-        <div className="card center" style={{ marginTop: 12 }}>
-          <div className="big">
-            {showdown.winnerSeat === "TIE" ? "Tie" :
-              (showdown.winnerSeat === mySeat ? "You Win" : "You Lose")}
-          </div>
-          <div className="sub">
-            {`Your hand: ${showdown.you || "-"}`}
-            {"  |  "}
-            {`Opponent: ${showdown.opp || "-"}`}
-          </div>
+        {/* 상대 카드 (항상 뒷면 2장) */}
+        <div className={`row opp ${blinkOpp?"blink":""}`}>
+          <CardBack /><CardBack />
         </div>
-      )}
+
+        {/* 공유 카드 (일렬, 공개 규칙) */}
+        <div className="row board">
+          {board.slice(0, revealed).map((c,i)=><CardView key={i} card={c}/>)}
+          {Array.from({length: Math.max(0,5-revealed)}).map((_,i)=><CardBack key={`b-${i}`} />)}
+        </div>
+
+        {/* 내 카드 */}
+        <div className="row mine">
+          {you.map((c,i)=>(
+            <div key={i} onClick={()=>toggleCard(i)} className={selected.includes(i)? "sel":""}>
+              <CardView card={c}/>
+            </div>
+          ))}
+        </div>
+
+        {/* 버튼 */}
+        <div className="row btns">
+          <button
+            className="btn btn-big"
+            disabled={readyMode ? false : !isMyTurn}
+            onClick={onAction}
+          >
+            {readyMode ? `Ready ${readyCount}/2` : (isMyTurn ? "Exchange" : "Waiting")}
+          </button>
+          <button className="btn btn-big" onClick={onSurrender}>Surrender</button>
+        </div>
+
+        {/* 쇼다운 텍스트 + 카운트 */}
+        {showdown && (
+          <div className="card center">
+            <div className="big">
+              {showdown.winnerSeat==="TIE" ? "Tie" :
+               showdown.winnerSeat===mySeat ? "You Win" : "You Lose"}
+            </div>
+            <div className="sub">
+              {`Your: ${showdown.you || "-"}`}{"  |  "}
+              {`Opponent: ${showdown.opp || "-"}`}
+            </div>
+            {count3!=null && <div className="sub" style={{marginTop:6}}>Showdown in {count3}s</div>}
+            {toRoulette!=null && <div className="sub" style={{marginTop:6}}>Roulette in {toRoulette}s</div>}
+          </div>
+        )}
+
+        {/* 룰렛 */}
+        {roulette.active && (
+          <Roulette
+            bullets={roulette.bullets}
+            loser={roulette.loser || "P2"}
+            onDone={(hit)=>{
+              const iGotHit = hit && roulette.loser===mySeat;
+              setFlash(iGotHit? "red":"white");
+              setTimeout(()=>{
+                setFlash(null);
+                // SAFE면 서버가 다음 라운드를 시작할 것. BANG이면 결과 화면으로.
+                if (hit){
+                  nav("/result", { replace:true, state:{
+                    winnerSeat: roulette.loser==="P1"?"P2":"P1",
+                    round
+                  }});
+                }
+              }, 1000);
+            }}
+          />
+        )}
+      </div>
+
+      {/* 전체 화면 깜박임 */}
+      {flash && <div className={`flash ${flash}`}/>}
     </div>
   );
 }
 
-/* ===== UI Pieces ===== */
-function NamesBar({ you, opp, myTurn, oppTurn }:{ you:string; opp:string; myTurn:boolean; oppTurn:boolean }){
-  return (
-    <div className="namesbar">
-      <div className="namepill">
-        <span className={`dot-sm ${myTurn ? "on" : ""}`} />
-        <span className="name">{you || "PLAYER1"}</span>
-      </div>
-      <div className="namepill right">
-        <span className="name">{opp || "PLAYER2"}</span>
-        <span className={`dot-sm ${oppTurn ? "on" : ""}`} />
-      </div>
-    </div>
-  );
+/* ========== 카드 컴포넌트 ========== */
+function CardBack(){
+  return <div className="card-rect back" aria-hidden="true"/>;
 }
-
-function CardBack(){ return <div className="box card-rect">🂠</div>; }
-
-function CardView({ card }:{ card:Card }){
+function CardView({ card }:{ card: Card }){
   if (card.back) return <CardBack/>;
-  if (card.isJoker) return <div className="box card-rect">JOKER</div>;
+  if (card.isJoker) return <div className="card-rect face">JOKER</div>;
   const suits = ["♠","♥","♦","♣"];
   const ranks:{[k:number]:string} = {11:"J",12:"Q",13:"K",14:"A"};
-  const r = card.r ? (ranks[card.r]||String(card.r)) : "?";
-  const s = (card.s!=null && card.s>=0)? suits[card.s]:"?";
-  return <div className="box card-rect">{r}{s}</div>;
+  const r = card.r ? (ranks[card.r] || String(card.r)) : "?";
+  const s = (card.s!=null && card.s>=0) ? suits[card.s] : "?";
+  return <div className="card-rect face">{r}{s}</div>;
 }
 
-/* === Roulette Visualization === */
-function Roulette({ bullets, loser }:{ bullets:number; loser:Seat }){
-  const [index,setIndex] = useState(0);        // 현재 포인터가 가리키는 챔버(0-5)
-  const [finished,setFinished] = useState(false);
+/* ========== 룰렛 ========== */
+function Roulette({ bullets, loser, onDone }:{
+  bullets:number; loser:Seat; onDone:(hit:boolean)=>void;
+}){
+  const [angle,setAngle] = useState(0);
+  const [running,setRunning] = useState(true);
   const [hit,setHit] = useState(false);
-  const wheelRef = useRef<HTMLDivElement>(null);
 
   useEffect(()=>{
     // 5초 대기 후 회전 시작
     const wait = setTimeout(()=>{
-      const spins = 12 + Math.floor(Math.random()*12); // 랜덤 회전 수
-      const target = Math.floor(Math.random()*6);       // 화살표에 멈출 위치
-      const totalSteps = spins*6 + target;              // 정확히 target에 정지
-      let step = 0;
+      // 6칸, 60도 단위. target에 정확히 정지.
+      const spins = 6 + Math.floor(Math.random()*8);
+      const target = Math.floor(Math.random()*6);
+      const chambers=[0,1,2,3,4,5]; shuffle(chambers);
+      const loaded = new Set(chambers.slice(0, Math.min(6, bullets)));
 
-      const t = setInterval(()=>{
-        step++; setIndex(prev => (prev+1)%6);
-        if (step >= totalSteps){
-          clearInterval(t);
-          setFinished(true);
-          // 장전된 챔버 무작위 선택(bullets 개수만큼)
-          const chambers = [0,1,2,3,4,5];
-          shuffle(chambers);
-          const loaded = new Set(chambers.slice(0, Math.min(6, bullets)));
-          setHit(loaded.has(target));
+      const targetAngle = 360*spins + target*60; // 시계 방향
+      const duration = 2200 + Math.random()*800;
+
+      const t0 = performance.now();
+      function step(t:number){
+        const p = Math.min(1, (t - t0)/duration);
+        // easeOutCubic
+        const eased = 1 - Math.pow(1-p, 3);
+        setAngle(targetAngle*eased);
+        if (p<1) requestAnimationFrame(step);
+        else {
+          setRunning(false);
+          const wasHit = loaded.has(target);
+          setHit(wasHit);
+          setTimeout(()=> onDone(wasHit), 500);
         }
-      }, 150); // 속도는 고정, 마지막 step에서 정확히 멈춤
+      }
+      requestAnimationFrame(step);
     }, 5000);
-
     return ()=>clearTimeout(wait);
-  }, [bullets]);
+  },[bullets,onDone]);
 
   return (
     <div className="roulette">
-      <div className="arrow">▲</div>
-      <div className="wheel" ref={wheelRef}>
+      <div className="pointer">▼</div>
+      <div className="disc" style={{ transform:`rotate(${angle}deg)` }}>
         {Array.from({length:6}).map((_,i)=>(
-          <div key={i} className={`chamber ${i===index ? "on":""}`} />
+          <div key={i} className="hole" style={{
+            transform:`rotate(${i*60}deg) translate(0, -74px) rotate(${-i*60}deg)`
+          }}/>
         ))}
       </div>
-      <div className="center sub" style={{marginTop:12}}>Player {loser} pulls the trigger...</div>
-      {finished && (
-        <div className="big" style={{ color: hit ? "#e74c3c" : "#2ecc71", marginTop: 8 }}>
+      <div className="sub" style={{marginTop:8}}>Player {loser} pulls the trigger...</div>
+      {!running && (
+        <div className="big" style={{ color: hit ? "#e74c3c" : "#2ecc71", marginTop: 4 }}>
           {hit ? "BANG!" : "SAFE"}
         </div>
       )}
@@ -270,5 +311,5 @@ function Roulette({ bullets, loser }:{ bullets:number; loser:Seat }){
   );
 }
 
-/* utils */
-function shuffle<T>(a:T[]):T[]{ for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a;}
+/* util */
+function shuffle<T>(a:T[]):T[]{ for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
