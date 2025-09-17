@@ -1,28 +1,41 @@
 // client/src/lib/socket.ts
 import { io, Socket } from "socket.io-client";
 
-/**
- * 서버 URL 우선순위
- * 1) VITE_SERVER_URL (Render Static Site의 Env에 설정)
- * 2) 현재 페이지 origin (동일 도메인 배치 시)
- */
-const SERVER_URL: string =
+// 서버 URL: .env 없으면 같은 도메인 사용
+export const SERVER_URL =
   (import.meta.env.VITE_SERVER_URL as string | undefined) ??
   `${window.location.protocol}//${window.location.host}`;
 
-/** socket.io 클라이언트 (웹소켓 강제) */
 export const socket: Socket = io(SERVER_URL, {
   transports: ["websocket"],
   withCredentials: true,
   autoConnect: true,
 });
 
-/** 디버그/표시용으로 서버 URL을 외부에서 참조할 때 사용 */
-export function getServerUrl() {
-  return SERVER_URL;
+// 간단한 온라인 상태 헬퍼
+let online = false;
+const listeners = new Set<(v: boolean) => void>();
+
+function emit(v: boolean) {
+  online = v;
+  listeners.forEach((cb) => cb(v));
 }
 
-/** (선택) 헬스체크 – 필요 없으면 사용하지 않아도 됨 */
+socket.on("connect", () => emit(true));
+socket.on("disconnect", () => emit(false));
+socket.on("connect_error", () => emit(false));
+
+export function isOnline() {
+  return online || socket.connected;
+}
+
+export function onOnlineChange(cb: (v: boolean) => void) {
+  listeners.add(cb);
+  cb(isOnline());
+  return () => listeners.delete(cb);
+}
+
+// /health 핑
 export async function pingServer(): Promise<boolean> {
   try {
     const res = await fetch(`${SERVER_URL}/health`, { cache: "no-store" });
@@ -31,3 +44,9 @@ export async function pingServer(): Promise<boolean> {
     return false;
   }
 }
+
+// 초기에 한번 핑해서 상태 세팅
+(async () => {
+  const ok = await pingServer();
+  emit(ok && socket.connected ? true : ok);
+})();
