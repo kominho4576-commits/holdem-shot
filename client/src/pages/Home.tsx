@@ -14,14 +14,12 @@ export default function HomePage() {
   const [nickname, setNickname] = useState("");
   const [serverUp, setServerUp] = useState(isOnline());
   const [busy, setBusy] = useState<"quick" | "create" | "join" | null>(null);
-
-  // 여러 이벤트가 와도 한 번만 /game 으로 이동하도록 가드
-  const navigatedRef = useRef(false);
+  const navigatedRef = useRef(false); // 중복 네비게이션 방지
 
   useEffect(() => {
     const off = onOnlineChange(setServerUp);
 
-    // 1) 방 코드가 직접 올 때 (createRoom 전용)
+    // 서버가 방을 만들면 바로 code를 줌 (createRoom 성공시)
     const onRoomCreated = ({ code }: { code: string }) => {
       setBusy(null);
       if (!code || navigatedRef.current) return;
@@ -30,7 +28,7 @@ export default function HomePage() {
       window.location.href = `/game?room=${encodeURIComponent(code)}&nick=${encodeURIComponent(me)}`;
     };
 
-    // 2) 어떤 경로든 방에 조인되면 state가 브로드캐스트됨 → code 포함
+    // 어떤 경로든 방에 조인되면 상태 브로드캐스트에 code가 포함됨
     const onState = (payload: any) => {
       setBusy(null);
       const code = payload?.code;
@@ -40,7 +38,7 @@ export default function HomePage() {
       window.location.href = `/game?room=${encodeURIComponent(code)}&nick=${encodeURIComponent(me)}`;
     };
 
-    // 3) 조인 실패/잘못된 코드 등 서버 에러
+    // joinRoom 실패/코드 틀림 등
     const onRoomError = (err: { message?: string }) => {
       setBusy(null);
       alert("❌ " + (err?.message || "Operation failed."));
@@ -79,9 +77,9 @@ export default function HomePage() {
     if (busy) return;
     setBusy("quick");
     const me = (nickname || "").trim() || "PLAYER";
-    // ✅ 서버 index.ts: "quickMatch"
+    // 🔑 서버 index.ts와 동일한 이벤트명
     socket.emit("quickMatch", { nickname: me });
-    // 이후 서버가 우리 소켓을 방에 조인시키고 "state"를 브로드캐스트 → onState에서 이동
+    // 성공 시 서버가 우리 소켓을 방에 조인시키고 "state" 브로드캐스트 → onState에서 이동
   }
 
   function onCreateRoom() {
@@ -92,9 +90,9 @@ export default function HomePage() {
     if (busy) return;
     setBusy("create");
     const me = (nickname || "").trim() || "PLAYER";
-    // ✅ 서버 index.ts: "createRoom"
+    // 🔑 서버 index.ts와 동일한 이벤트명
     socket.emit("createRoom", { nickname: me });
-    // 성공 시 서버가 "roomCreated" 이벤트로 code 전달 → onRoomCreated에서 이동
+    // 성공 시 서버가 "roomCreated"로 code 전달 → onRoomCreated에서 이동
   }
 
   function onJoinRoom() {
@@ -106,7 +104,8 @@ export default function HomePage() {
     if (!code) return;
 
     const c = code.trim().toUpperCase();
-    const valid = /^[A-HJ-KMNP-Z2-9]{6}$/.test(c); // 0,1,O,I 제외
+    // 0,1,O,I 제외한 6자리: A-H J-K M N P-Z, 2-9
+    const valid = /^[A-HJ-KMNP-Z2-9]{6}$/.test(c);
     if (!valid) {
       alert("❌ Invalid code. Use 6 chars (A–Z except O/I, 2–9).");
       return;
@@ -115,9 +114,9 @@ export default function HomePage() {
     if (busy) return;
     setBusy("join");
     const me = (nickname || "").trim() || "PLAYER";
-    // ✅ 서버 index.ts: "joinRoom" + 에러는 "error:room"으로 옴
+    // 🔑 서버 index.ts와 동일한 이벤트명
     socket.emit("joinRoom", { code: c, nickname: me });
-    // 성공 시 서버가 우리를 방에 조인시키고 "state" 브로드캐스트 → onState에서 이동
+    // 성공 시 서버가 방에 조인시키고 "state" 브로드캐스트 → onState에서 이동
   }
 
   const quickLabel = useMemo(() => {
@@ -141,7 +140,7 @@ export default function HomePage() {
           </button>
         </div>
 
-        {/* 닉네임 + 퀵매치 (가로 배치, 겹침 방지) */}
+        {/* 닉네임 + 퀵매치 */}
         <div className="row nowrap">
           <input
             className="input"
